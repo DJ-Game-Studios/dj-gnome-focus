@@ -1,0 +1,7 @@
+{
+  "uuid": "dj-gnome-focus@djmsqrvve",
+  "name": "DJ GNOME Focus",
+  "description": "Exposes a D-Bus method to focus any app window by desktop ID. Used by dj-cli and Claude Code hooks for notification-driven window activation on Wayland.",
+  "shell-version": ["47", "48", "49", "50"],
+  "version": 1
+}

@@ -1,0 +1,3 @@
+schemas/gschemas.compiled
+*.pyc
+.DS_Store
