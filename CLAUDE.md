@@ -25,8 +25,10 @@ Wayland can't live-reload extensions. Options:
 
 ## Integration callers (wire up when needed)
 
-Currently zero. Future homes:
-- `dj-cli/dj_cli/commands/focus.py` — `dj focus <app-id>` / `dj focus --title <substr>`
+Active integrations:
+- `dj-cli/dj_cli/commands/video.py` — `dj video focus <pattern>` uses the `FocusTitle` method to switch focus to windows by title pattern (case-insensitive substring match). See INTERFACE.md for full D-Bus documentation.
+
+Future homes:
 - `~/.claude/hooks/notification-focus.sh` — Claude Code Notification hook
 
 ## Umbrella
