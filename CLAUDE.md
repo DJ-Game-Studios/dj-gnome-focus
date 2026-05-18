@@ -26,7 +26,8 @@ Wayland can't live-reload extensions. Options:
 ## Integration callers (wire up when needed)
 
 Active integrations:
-- `dj-cli/dj_cli/commands/video.py` — `dj video focus <pattern>` uses the `FocusTitle` method to switch focus to windows by title pattern (case-insensitive substring match). See INTERFACE.md for full D-Bus documentation.
+- `dj-cli/dj_cli/commands/video.py` — `dj video focus <pattern>` uses `FocusTitle`.
+- `dj-cli/dj_cli/commands/terminals.py` — `dj terminals grid` uses `TileWindowByPid` to drop N Ptyxis windows into an arbitrary cols×rows grid on the primary work area. Default 8 windows in 4×2 (OPEN_ITEMS #233's 1/8-tile convention).
 
 Future homes:
 - `~/.claude/hooks/notification-focus.sh` — Claude Code Notification hook

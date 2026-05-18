@@ -55,15 +55,40 @@ gdbus call --session \
   "Helix2000"
 ```
 
-## Integration with dj-cli
+### TileWindowByPid
 
-The `dj video focus` command wraps the `FocusTitle` method:
+Move and resize a window — identified by its owning process PID — to a rectangle expressed as 0..1 ratios of the primary monitor's active work area.
+
+**Signature**: `TileWindowByPid(pid: int32, xRatio: double, yRatio: double, wRatio: double, hRatio: double) → boolean`
+
+**Parameters**:
+- `pid` (int32): PID of the process that owns the target window (`Meta.Window.get_pid()` matches this)
+- `xRatio`, `yRatio` (double): Top-left corner as a fraction of the work area (0..1)
+- `wRatio`, `hRatio` (double): Width / height as a fraction of the work area (0..1)
+
+**Returns**:
+- `success` (boolean): `true` if a window matched the PID and was repositioned, `false` if no match.
+
+The method computes absolute coordinates from `workspace.get_work_area_for_monitor(primary)`, so it adapts to monitor-layout changes (`dj video layout 1/2/3`) without the caller needing to know pixel geometry. If the target is maximized, it is unmaximized first.
+
+**Example** — tile the window owned by pid 12345 to the top-left quarter of the primary monitor:
 
 ```bash
-dj video focus Helix2000
+gdbus call --session \
+  --dest org.gnome.Shell \
+  --object-path /org/gnome/Shell/Extensions/DjFocus \
+  --method org.gnome.Shell.Extensions.DjFocus.TileWindowByPid \
+  12345 0.0 0.0 0.5 0.5
 ```
 
-This is equivalent to the gdbus call above, with user-friendly output.
+**Pairing with Ptyxis**: Ptyxis defaults to a single-instance GApplication, so `subprocess.Popen(["ptyxis", "--new-window"])` returns a short-lived launcher PID, not the window's owning PID. Pass `--standalone` to spawn a real per-window process whose PID can be matched.
+
+## Integration with dj-cli
+
+| dj-cli command | Method used |
+|---|---|
+| `dj video focus <pattern>` | `FocusTitle` |
+| `dj terminals grid` | `TileWindowByPid` (1/8-tile 4×2 grid per OPEN_ITEMS #233) |
 
 ## Testing
 
