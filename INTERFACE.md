@@ -81,14 +81,45 @@ gdbus call --session \
   12345 0.0 0.0 0.5 0.5
 ```
 
-**Pairing with Ptyxis**: Ptyxis defaults to a single-instance GApplication, so `subprocess.Popen(["ptyxis", "--new-window"])` returns a short-lived launcher PID, not the window's owning PID. Pass `--standalone` to spawn a real per-window process whose PID can be matched.
+**Pairing with Ptyxis**: Even with `--standalone`, Ptyxis (and other GApplication-backed apps like gnome-terminal, nautilus) report the system-wide GApplication daemon PID via `Meta.Window.get_pid()`. PID matching therefore fails for these. Use `TileWindowByTitle` instead — combined with `ptyxis --title "DJTile-N"` to give each window a unique matcher.
+
+### TileWindowByTitle
+
+Move and resize the first window whose title contains `substring` (case-insensitive). Same rectangle semantics as `TileWindowByPid`.
+
+**Signature**: `TileWindowByTitle(substring: string, xRatio: double, yRatio: double, wRatio: double, hRatio: double) → boolean`
+
+**Example** — tile the window titled "DJTile-3" to the bottom-right quarter of the primary monitor:
+
+```bash
+gdbus call --session \
+  --dest org.gnome.Shell \
+  --object-path /org/gnome/Shell/Extensions/DjFocus \
+  --method org.gnome.Shell.Extensions.DjFocus.TileWindowByTitle \
+  "DJTile-3" 0.5 0.5 0.5 0.5
+```
+
+### ListWindows
+
+Dump all visible windows as a JSON string. Each entry: `{wm_class, title, pid, id}`. Useful for debugging title/PID matchers.
+
+**Signature**: `ListWindows() → string`
+
+```bash
+gdbus call --session \
+  --dest org.gnome.Shell \
+  --object-path /org/gnome/Shell/Extensions/DjFocus \
+  --method org.gnome.Shell.Extensions.DjFocus.ListWindows
+```
 
 ## Integration with dj-cli
 
 | dj-cli command | Method used |
 |---|---|
 | `dj video focus <pattern>` | `FocusTitle` |
-| `dj terminals grid` | `TileWindowByPid` (1/8-tile 4×2 grid per OPEN_ITEMS #233) |
+| `dj terminals grid` | `TileWindowByTitle` (1/8-tile 4×2 grid per OPEN_ITEMS #233) |
+| `dj terminals list-windows` | `ListWindows` |
+| `dj terminals status` | `ListWindows` (for `DJTile-*` window enumeration) |
 
 ## Testing
 
@@ -116,4 +147,4 @@ gdbus call --session \
 - The extension uses `Shell.WindowTracker.get_default()` and `global.get_window_actors()` to enumerate windows
 - Window matching is case-insensitive for `FocusTitle`
 - For `FocusApp`, the most recently used window of the app is focused
-- All methods return a single-bool tuple `GLib.Variant('(b)', [result])` per D-Bus requirements
+- Boolean-returning methods use `GLib.Variant('(b)', [result])`; `ListWindows` uses `GLib.Variant('(s)', [json])`. The XML signature drives the marshal.

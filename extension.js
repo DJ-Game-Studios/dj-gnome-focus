@@ -6,6 +6,9 @@
  *   FocusTitle(substring: string) → boolean
  *   TileWindowByPid(pid: int32, xRatio: double, yRatio: double,
  *                   wRatio: double, hRatio: double) → boolean
+ *   TileWindowByTitle(substring: string, xRatio: double, yRatio: double,
+ *                     wRatio: double, hRatio: double) → boolean
+ *   ListWindows() → string  (JSON: [{wm_class, title, pid, id}, ...])
  *
  * Wayland forbids arbitrary window manipulation from unprivileged clients.
  * Extensions run inside Mutter, so they can.
@@ -37,6 +40,17 @@ const IFACE_XML = `
       <arg type="d" direction="in" name="hRatio"/>
       <arg type="b" direction="out" name="success"/>
     </method>
+    <method name="TileWindowByTitle">
+      <arg type="s" direction="in" name="substring"/>
+      <arg type="d" direction="in" name="xRatio"/>
+      <arg type="d" direction="in" name="yRatio"/>
+      <arg type="d" direction="in" name="wRatio"/>
+      <arg type="d" direction="in" name="hRatio"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
+    <method name="ListWindows">
+      <arg type="s" direction="out" name="json"/>
+    </method>
   </interface>
 </node>`;
 
@@ -60,6 +74,13 @@ export default class DjGnomeFocus extends Extension {
                     const [pid, xR, yR, wR, hR] = params.deep_unpack();
                     const result = this._tileWindowByPid(pid, xR, yR, wR, hR);
                     invocation.return_value(new GLib.Variant('(b)', [result]));
+                } else if (method === 'TileWindowByTitle') {
+                    const [substring, xR, yR, wR, hR] = params.deep_unpack();
+                    const result = this._tileWindowByTitle(substring, xR, yR, wR, hR);
+                    invocation.return_value(new GLib.Variant('(b)', [result]));
+                } else if (method === 'ListWindows') {
+                    const json = this._listWindows();
+                    invocation.return_value(new GLib.Variant('(s)', [json]));
                 }
             },
             null,
@@ -109,13 +130,7 @@ export default class DjGnomeFocus extends Extension {
         return true;
     }
 
-    // Positions a window owned by `pid` to the rect described by 0..1 ratios
-    // of the primary monitor's work area. Returns false if no matching window.
-    _tileWindowByPid(pid, xRatio, yRatio, wRatio, hRatio) {
-        const target = this._findWindow(w => w.get_pid() === pid);
-        if (!target)
-            return false;
-
+    _tileTo(target, xRatio, yRatio, wRatio, hRatio) {
         const monitorIdx = global.display.get_primary_monitor();
         const ws = global.workspace_manager.get_active_workspace();
         const workArea = ws.get_work_area_for_monitor(monitorIdx);
@@ -129,5 +144,44 @@ export default class DjGnomeFocus extends Extension {
             target.unmaximize(Meta.MaximizeFlags.BOTH);
         target.move_resize_frame(true, x, y, w, h);
         return true;
+    }
+
+    // Positions a window owned by `pid` to the rect described by 0..1 ratios
+    // of the primary monitor's work area. Returns false if no matching window.
+    // Note: GApplication-backed apps (Ptyxis, gnome-terminal) report the daemon
+    // PID, not the launcher PID — use TileWindowByTitle for those.
+    _tileWindowByPid(pid, xRatio, yRatio, wRatio, hRatio) {
+        const target = this._findWindow(w => w.get_pid() === pid);
+        if (!target)
+            return false;
+        return this._tileTo(target, xRatio, yRatio, wRatio, hRatio);
+    }
+
+    // Like TileWindowByPid but matches the first window whose title contains
+    // `substring` (case-insensitive). Works for GApplication-backed apps where
+    // PID matching fails. Pair with launchers that set unique titles (e.g.
+    // `ptyxis --title "DJTile-3" --new-window`).
+    _tileWindowByTitle(substring, xRatio, yRatio, wRatio, hRatio) {
+        const lc = substring.toLowerCase();
+        const target = this._findWindow(w => (w.get_title() || '').toLowerCase().includes(lc));
+        if (!target)
+            return false;
+        return this._tileTo(target, xRatio, yRatio, wRatio, hRatio);
+    }
+
+    // Dump all visible windows as JSON. Useful for CLI debugging — e.g.
+    // "why didn't TileWindowByTitle match?" → list and inspect the actual titles.
+    _listWindows() {
+        const out = [];
+        for (const actor of global.get_window_actors()) {
+            const w = actor.meta_window;
+            out.push({
+                wm_class: w.get_wm_class() || '',
+                title: w.get_title() || '',
+                pid: w.get_pid(),
+                id: w.get_id(),
+            });
+        }
+        return JSON.stringify(out);
     }
 }

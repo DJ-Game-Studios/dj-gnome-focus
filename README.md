@@ -1,12 +1,14 @@
 # DJ GNOME Focus
 
-D-Bus window-control service for GNOME Shell on Wayland. Exposes three methods on `org.gnome.Shell.Extensions.DjFocus`:
+D-Bus window-control service for GNOME Shell on Wayland. Exposes five methods on `org.gnome.Shell.Extensions.DjFocus`:
 
 | Method | Args | Returns |
 |--------|------|---------|
 | `FocusApp(appId: string)` | desktop ID (e.g. `code_code.desktop`) | `bool` — true if a window was activated |
 | `FocusTitle(substring: string)` | case-insensitive title substring | `bool` |
-| `TileWindowByPid(pid: int, xR, yR, wR, hR: double)` | owning process PID + 0..1 ratios of primary work area | `bool` — true if window was moved/resized |
+| `TileWindowByPid(pid: int, xR, yR, wR, hR: double)` | owning process PID + 0..1 ratios of primary work area | `bool` — fails for GApplication-backed apps (use title instead) |
+| `TileWindowByTitle(substring: string, xR, yR, wR, hR: double)` | title substring + 0..1 ratios | `bool` — robust against GApplication daemon PID indirection |
+| `ListWindows()` | — | `string` — JSON array of `{wm_class, title, pid, id}` for every visible window |
 
 ## Why
 
@@ -42,7 +44,8 @@ gdbus call --session \
 Enabled in GNOME Shell on main-pc (Node-2). Consumers:
 
 - `dj video focus <pattern>` — wraps `FocusTitle`
-- `dj terminals grid` — wraps `TileWindowByPid` to drop 8 Ptyxis windows into a 4×2 tile layout (1/8-tile convention, OPEN_ITEMS #233)
+- `dj terminals grid` — wraps `TileWindowByTitle` to drop 8 Ptyxis windows (each launched with a unique `--title "DJTile-N"`) into a 4×2 tile layout (1/8-tile convention, OPEN_ITEMS #233)
+- `dj terminals list-windows` / `dj terminals status` — wrap `ListWindows` for debugging tile matchers
 
 Future homes still on the table:
 - Claude Code `Notification` hook that raises the triggering window

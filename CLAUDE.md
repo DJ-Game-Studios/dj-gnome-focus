@@ -8,7 +8,7 @@ GNOME Shell extension. Tiny surface — two files:
 
 - Shell-version matrix is `["47", "48", "49", "50"]`. Do not narrow without checking `gnome-shell --version`.
 - `version` in metadata.json is only bumped when uploading to extensions.gnome.org. Local symlink-installs (via umbrella `install.sh`) don't care about it.
-- Methods must return `GLib.Variant('(b)', [result])` — single-bool tuple, or D-Bus will reject.
+- Methods must return `GLib.Variant('(b)', [result])` for boolean returns, or `GLib.Variant('(s)', [json])` for string returns. The XML signature must match.
 - Don't add dependencies on `Shell.WindowTracker` beyond `get_default()` + `get_windows()` — that's the stable subset.
 
 ## When testing
@@ -27,7 +27,17 @@ Wayland can't live-reload extensions. Options:
 
 Active integrations:
 - `dj-cli/dj_cli/commands/video.py` — `dj video focus <pattern>` uses `FocusTitle`.
-- `dj-cli/dj_cli/commands/terminals.py` — `dj terminals grid` uses `TileWindowByPid` to drop N Ptyxis windows into an arbitrary cols×rows grid on the primary work area. Default 8 windows in 4×2 (OPEN_ITEMS #233's 1/8-tile convention).
+- `dj-cli/dj_cli/commands/terminals.py` — `dj terminals grid` uses `TileWindowByTitle` (PID-matching path is dormant; left in place for non-GApplication apps). Each Ptyxis window is launched with `--title "DJTile-N"` and matched by that unique title. Default 8 windows in 4×2 (OPEN_ITEMS #233's 1/8-tile convention). `dj terminals list-windows` uses `ListWindows` to dump the matcher's input for debugging.
+
+## Method surface (current)
+
+| Method | Signature | Notes |
+|---|---|---|
+| `FocusApp` | `(s) → b` | Lookup by GApp ID, focus most-recent window |
+| `FocusTitle` | `(s) → b` | First window whose title contains substring (case-insensitive) |
+| `TileWindowByPid` | `(i,d,d,d,d) → b` | Match by PID; fails for GApplication-backed apps (Ptyxis, gnome-terminal, nautilus) since Mutter reports the daemon PID |
+| `TileWindowByTitle` | `(s,d,d,d,d) → b` | Match by title substring; pair with launchers that set unique titles |
+| `ListWindows` | `() → s` | JSON array of `{wm_class, title, pid, id}` for every visible window |
 
 Future homes:
 - `~/.claude/hooks/notification-focus.sh` — Claude Code Notification hook
