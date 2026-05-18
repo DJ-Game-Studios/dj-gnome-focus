@@ -62,25 +62,38 @@ export default class DjGnomeFocus extends Extension {
             '/org/gnome/Shell/Extensions/DjFocus',
             Gio.DBusNodeInfo.new_for_xml(IFACE_XML).interfaces[0],
             (connection, sender, path, iface, method, params, invocation) => {
-                if (method === 'FocusApp') {
-                    const appId = params.deep_unpack()[0];
-                    const result = this._focusApp(appId);
-                    invocation.return_value(new GLib.Variant('(b)', [result]));
-                } else if (method === 'FocusTitle') {
-                    const substring = params.deep_unpack()[0];
-                    const result = this._focusTitle(substring);
-                    invocation.return_value(new GLib.Variant('(b)', [result]));
-                } else if (method === 'TileWindowByPid') {
-                    const [pid, xR, yR, wR, hR] = params.deep_unpack();
-                    const result = this._tileWindowByPid(pid, xR, yR, wR, hR);
-                    invocation.return_value(new GLib.Variant('(b)', [result]));
-                } else if (method === 'TileWindowByTitle') {
-                    const [substring, xR, yR, wR, hR] = params.deep_unpack();
-                    const result = this._tileWindowByTitle(substring, xR, yR, wR, hR);
-                    invocation.return_value(new GLib.Variant('(b)', [result]));
-                } else if (method === 'ListWindows') {
-                    const json = this._listWindows();
-                    invocation.return_value(new GLib.Variant('(s)', [json]));
+                // Wrap every handler so a JS exception returns a useful D-Bus
+                // error rather than hanging the caller for 8+ seconds.
+                try {
+                    if (method === 'FocusApp') {
+                        const appId = params.deep_unpack()[0];
+                        const result = this._focusApp(appId);
+                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                    } else if (method === 'FocusTitle') {
+                        const substring = params.deep_unpack()[0];
+                        const result = this._focusTitle(substring);
+                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                    } else if (method === 'TileWindowByPid') {
+                        const [pid, xR, yR, wR, hR] = params.deep_unpack();
+                        const result = this._tileWindowByPid(pid, xR, yR, wR, hR);
+                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                    } else if (method === 'TileWindowByTitle') {
+                        const [substring, xR, yR, wR, hR] = params.deep_unpack();
+                        const result = this._tileWindowByTitle(substring, xR, yR, wR, hR);
+                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                    } else if (method === 'ListWindows') {
+                        const json = this._listWindows();
+                        invocation.return_value(new GLib.Variant('(s)', [json]));
+                    } else {
+                        invocation.return_error_literal(
+                            Gio.DBusError, Gio.DBusError.UNKNOWN_METHOD,
+                            `Unknown method: ${method}`);
+                    }
+                } catch (e) {
+                    console.error(`DjFocus.${method} threw:`, e);
+                    invocation.return_error_literal(
+                        Gio.DBusError, Gio.DBusError.FAILED,
+                        `${method}: ${e.message || e}`);
                 }
             },
             null,
@@ -140,8 +153,13 @@ export default class DjGnomeFocus extends Extension {
         const w = Math.max(1, Math.round(wRatio * workArea.width));
         const h = Math.max(1, Math.round(hRatio * workArea.height));
 
-        if (target.get_maximized())
+        // Unmaximize unconditionally — no-op if not maximized. Avoids API drift
+        // on get_maximized()/maximized_horizontally between Meta versions.
+        try {
             target.unmaximize(Meta.MaximizeFlags.BOTH);
+        } catch (_e) {
+            // some Meta builds throw if already non-maximized; safe to ignore
+        }
         target.move_resize_frame(true, x, y, w, h);
         return true;
     }
