@@ -91,30 +91,28 @@ export default class DjGnomeFocus extends Extension {
         return true;
     }
 
-    _focusTitle(substring) {
-        const lc = substring.toLowerCase();
+    _findWindow(predicate) {
         for (const actor of global.get_window_actors()) {
             const win = actor.meta_window;
-            const title = (win.get_title() || '').toLowerCase();
-            if (title.includes(lc)) {
-                win.activate(global.get_current_time());
-                return true;
-            }
+            if (predicate(win))
+                return win;
         }
-        return false;
+        return null;
+    }
+
+    _focusTitle(substring) {
+        const lc = substring.toLowerCase();
+        const win = this._findWindow(w => (w.get_title() || '').toLowerCase().includes(lc));
+        if (!win)
+            return false;
+        win.activate(global.get_current_time());
+        return true;
     }
 
     // Positions a window owned by `pid` to the rect described by 0..1 ratios
     // of the primary monitor's work area. Returns false if no matching window.
     _tileWindowByPid(pid, xRatio, yRatio, wRatio, hRatio) {
-        let target = null;
-        for (const actor of global.get_window_actors()) {
-            const win = actor.meta_window;
-            if (win.get_pid() === pid) {
-                target = win;
-                break;
-            }
-        }
+        const target = this._findWindow(w => w.get_pid() === pid);
         if (!target)
             return false;
 
