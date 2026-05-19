@@ -47,6 +47,8 @@ Active integrations:
 | `CloseByTitle` | `(s) → b` | Polite `meta_window.delete()` — apps that prompt before close still prompt |
 | `MoveToWorkspace` | `(s,i) → b` | Move first matching window to workspace index (0-based, range-checked) |
 | `TileBatch` | `(s) → s` | Atomic batch tile. Input: JSON `[{title, x, y, w, h}]` (0..1 ratios). Output: `{placed: N, failed: [titles]}`. One D-Bus round trip vs N |
+| `GetMonitors` | `() → s` | JSON `{primary: idx, count: N, monitors: [{index, primary, geometry, work_area, scale}]}`. Use for absolute-pixel tile math against non-primary monitors. |
+| `TileByTitlePixels` | `(s,i,i,i,i) → b` | Absolute-pixel placement. Bypasses the primary-work-area math of `TileWindowByTitle`. Useful when targeting non-primary monitors. |
 
 Hook integrations:
 - `~/.claude/hooks/notification-focus.sh` — calls `FocusTitle "claude"` on Stop hook to pop the Claude Code window when work finishes / needs attention. Wire into `settings.json` `Stop` hook to use.

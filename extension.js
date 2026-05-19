@@ -83,6 +83,17 @@ const IFACE_XML = `
       <arg type="s" direction="in" name="json"/>
       <arg type="s" direction="out" name="result"/>
     </method>
+    <method name="GetMonitors">
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="TileByTitlePixels">
+      <arg type="s" direction="in" name="substring"/>
+      <arg type="i" direction="in" name="x"/>
+      <arg type="i" direction="in" name="y"/>
+      <arg type="i" direction="in" name="w"/>
+      <arg type="i" direction="in" name="h"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
   </interface>
 </node>`;
 
@@ -128,6 +139,11 @@ export default class DjGnomeFocus extends Extension {
                     } else if (method === 'TileBatch') {
                         const json = params.deep_unpack()[0];
                         invocation.return_value(new GLib.Variant('(s)', [this._tileBatch(json)]));
+                    } else if (method === 'GetMonitors') {
+                        invocation.return_value(new GLib.Variant('(s)', [this._getMonitors()]));
+                    } else if (method === 'TileByTitlePixels') {
+                        const [substring, x, y, w, h] = params.deep_unpack();
+                        invocation.return_value(new GLib.Variant('(b)', [this._tileByTitlePixels(substring, x, y, w, h)]));
                     } else {
                         invocation.return_error_literal(
                             Gio.DBusError, Gio.DBusError.UNKNOWN_METHOD,
@@ -287,6 +303,45 @@ export default class DjGnomeFocus extends Extension {
         if (wsIndex < 0 || wsIndex >= wsCount)
             return false;
         target.change_workspace_by_index(wsIndex, false);
+        return true;
+    }
+
+    // Mutter monitor geometry — full set, primary index, work area.
+    // Use for tile math against monitors other than the primary, or to know
+    // which monitor a TV/secondary is currently at.
+    _getMonitors() {
+        const display = global.display;
+        const primaryIdx = display.get_primary_monitor();
+        const n = display.get_n_monitors();
+        const ws = global.workspace_manager.get_active_workspace();
+        const monitors = [];
+        for (let i = 0; i < n; i++) {
+            const rect = display.get_monitor_geometry(i);
+            const workArea = ws.get_work_area_for_monitor(i);
+            monitors.push({
+                index: i,
+                primary: i === primaryIdx,
+                geometry: {x: rect.x, y: rect.y, w: rect.width, h: rect.height},
+                work_area: {x: workArea.x, y: workArea.y, w: workArea.width, h: workArea.height},
+                scale: display.get_monitor_scale(i),
+            });
+        }
+        return JSON.stringify({primary: primaryIdx, count: n, monitors});
+    }
+
+    // Absolute-pixel placement. Bypasses the primary-work-area math of _tileTo —
+    // caller specifies exact pixels. Useful when targeting non-primary monitors
+    // or when ratios would round inconveniently.
+    _tileByTitlePixels(substring, x, y, w, h) {
+        const target = this._findByTitle(substring);
+        if (!target)
+            return false;
+        try {
+            target.unmaximize(Meta.MaximizeFlags.BOTH);
+        } catch (_e) {
+            // ignore
+        }
+        target.move_resize_frame(true, x, y, Math.max(1, w), Math.max(1, h));
         return true;
     }
 
