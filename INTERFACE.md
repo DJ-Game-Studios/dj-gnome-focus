@@ -112,14 +112,100 @@ gdbus call --session \
   --method org.gnome.Shell.Extensions.DjFocus.ListWindows
 ```
 
+### GetActiveWindow
+
+Return the currently focused window as a JSON string. Shape:
+`{wm_class, title, pid, id, x, y, w, h, monitor}`. Returns the string `null` (JSON literal) if no window is focused. Added in v4.
+
+**Signature**: `GetActiveWindow() → string`
+
+```bash
+gdbus call --session \
+  --dest org.gnome.Shell \
+  --object-path /org/gnome/Shell/Extensions/DjFocus \
+  --method org.gnome.Shell.Extensions.DjFocus.GetActiveWindow
+```
+
+### MoveWindowByTitle
+
+Move a window to absolute pixel `(x, y)` without resizing. Unmaximizes first. Added in v4.
+
+**Signature**: `MoveWindowByTitle(substring: string, x: int32, y: int32) → boolean`
+
+### MinimizeByTitle
+
+Minimize the first window whose title contains `substring`. Added in v4.
+
+**Signature**: `MinimizeByTitle(substring: string) → boolean`
+
+### CloseByTitle
+
+Polite close (`meta_window.delete(time)`) — apps that prompt before exit still prompt. Added in v4.
+
+**Signature**: `CloseByTitle(substring: string) → boolean`
+
+### MoveToWorkspace
+
+Move the first matching window to the given workspace index (0-based, range-checked). Added in v4.
+
+**Signature**: `MoveToWorkspace(substring: string, workspace: int32) → boolean`
+
+### TileBatch
+
+Atomic batch tile. Input is a JSON array of `{title, x, y, w, h}` (ratios 0..1 of the primary work area). Output is a JSON object `{placed: N, failed: [titles]}`. One D-Bus round trip for N windows — much cheaper than N sequential `TileWindowByTitle` calls, and removes any mid-loop race for callers that fire them in sequence. Added in v4.
+
+**Signature**: `TileBatch(json: string) → string`
+
+```bash
+gdbus call --session \
+  --dest org.gnome.Shell \
+  --object-path /org/gnome/Shell/Extensions/DjFocus \
+  --method org.gnome.Shell.Extensions.DjFocus.TileBatch \
+  '[{"title":"DJTile-0","x":0,"y":0,"w":0.5,"h":0.5},{"title":"DJTile-1","x":0.5,"y":0,"w":0.5,"h":0.5}]'
+```
+
+### GetMonitors
+
+Return full Mutter monitor topology as a JSON string. Shape:
+`{primary: idx, count: N, monitors: [{index, primary, geometry: {x,y,w,h}, work_area: {x,y,w,h}, scale}, ...]}`. Use to do absolute-pixel tile math against non-primary monitors. Added in v5.
+
+**Signature**: `GetMonitors() → string`
+
+### TileByTitlePixels
+
+Absolute-pixel placement. Bypasses the primary-work-area math of `TileWindowByTitle` — caller specifies exact pixels. Useful when targeting non-primary monitors (e.g. the TV at HDMI-1) or when ratios round inconveniently. Added in v5.
+
+**Signature**: `TileByTitlePixels(substring: string, x: int32, y: int32, w: int32, h: int32) → boolean`
+
 ## Integration with dj-cli
 
 | dj-cli command | Method used |
 |---|---|
 | `dj video focus <pattern>` | `FocusTitle` |
-| `dj terminals grid` | `TileWindowByTitle` (1/8-tile 4×2 grid per OPEN_ITEMS #233) |
+| `dj terminals grid [preset]` | `TileWindowByTitle` (1/8-tile 4×2 grid per OPEN_ITEMS #233) |
 | `dj terminals list-windows` | `ListWindows` |
 | `dj terminals status` | `ListWindows` (for `DJTile-*` window enumeration) |
+| `dj windows list` | `ListWindows` |
+| `dj windows active` | `GetActiveWindow` |
+| `dj windows focus <pattern>` | `FocusTitle` |
+| `dj windows tile <pattern> X Y W H` | `TileWindowByTitle` |
+| `dj windows move <pattern> X Y` | `MoveWindowByTitle` |
+| `dj windows minimize <pattern>` | `MinimizeByTitle` |
+| `dj windows close <pattern>` | `CloseByTitle` |
+| `dj windows workspace <pattern> N` | `MoveToWorkspace` |
+| `dj windows tile-batch <json>` | `TileBatch` |
+
+## Integration with dj-mcp
+
+| MCP tool | Method used |
+|---|---|
+| `dj_window_list` | `ListWindows` (via `dj windows list --json`) |
+| `dj_window_active` | `GetActiveWindow` |
+| `dj_window_focus` | `FocusTitle` |
+| `dj_window_tile` | `TileWindowByTitle` |
+| `dj_window_close` | `CloseByTitle` |
+| `dj_window_tile_batch` | `TileBatch` |
+| `dj_monitors_list` | `GetMonitors` (also via `dj video state --json` / Mutter DisplayConfig) |
 
 ## Testing
 
