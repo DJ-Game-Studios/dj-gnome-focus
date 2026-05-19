@@ -4,11 +4,17 @@
  * Methods on org.gnome.Shell.Extensions.DjFocus:
  *   FocusApp(appId: string) → boolean
  *   FocusTitle(substring: string) → boolean
- *   TileWindowByPid(pid: int32, xRatio: double, yRatio: double,
- *                   wRatio: double, hRatio: double) → boolean
- *   TileWindowByTitle(substring: string, xRatio: double, yRatio: double,
- *                     wRatio: double, hRatio: double) → boolean
+ *   TileWindowByPid(pid: int32, xRatio, yRatio, wRatio, hRatio: double) → boolean
+ *   TileWindowByTitle(substring: string, xRatio, yRatio, wRatio, hRatio: double) → boolean
  *   ListWindows() → string  (JSON: [{wm_class, title, pid, id}, ...])
+ *   GetActiveWindow() → string  (JSON: {wm_class, title, pid, id, x, y, w, h, monitor})
+ *   MoveWindowByTitle(substring: string, x, y: int32) → boolean
+ *   MinimizeByTitle(substring: string) → boolean
+ *   CloseByTitle(substring: string) → boolean
+ *   MoveToWorkspace(substring: string, workspace: int32) → boolean
+ *   TileBatch(json: string) → string
+ *       Input  : [{title, x, y, w, h}, ...]  (ratios 0..1 of primary work area)
+ *       Output : {placed: N, failed: [titles...]}
  *
  * Wayland forbids arbitrary window manipulation from unprivileged clients.
  * Extensions run inside Mutter, so they can.
@@ -51,6 +57,32 @@ const IFACE_XML = `
     <method name="ListWindows">
       <arg type="s" direction="out" name="json"/>
     </method>
+    <method name="GetActiveWindow">
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="MoveWindowByTitle">
+      <arg type="s" direction="in" name="substring"/>
+      <arg type="i" direction="in" name="x"/>
+      <arg type="i" direction="in" name="y"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
+    <method name="MinimizeByTitle">
+      <arg type="s" direction="in" name="substring"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
+    <method name="CloseByTitle">
+      <arg type="s" direction="in" name="substring"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
+    <method name="MoveToWorkspace">
+      <arg type="s" direction="in" name="substring"/>
+      <arg type="i" direction="in" name="workspace"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
+    <method name="TileBatch">
+      <arg type="s" direction="in" name="json"/>
+      <arg type="s" direction="out" name="result"/>
+    </method>
   </interface>
 </node>`;
 
@@ -67,23 +99,35 @@ export default class DjGnomeFocus extends Extension {
                 try {
                     if (method === 'FocusApp') {
                         const appId = params.deep_unpack()[0];
-                        const result = this._focusApp(appId);
-                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                        invocation.return_value(new GLib.Variant('(b)', [this._focusApp(appId)]));
                     } else if (method === 'FocusTitle') {
                         const substring = params.deep_unpack()[0];
-                        const result = this._focusTitle(substring);
-                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                        invocation.return_value(new GLib.Variant('(b)', [this._focusTitle(substring)]));
                     } else if (method === 'TileWindowByPid') {
                         const [pid, xR, yR, wR, hR] = params.deep_unpack();
-                        const result = this._tileWindowByPid(pid, xR, yR, wR, hR);
-                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                        invocation.return_value(new GLib.Variant('(b)', [this._tileWindowByPid(pid, xR, yR, wR, hR)]));
                     } else if (method === 'TileWindowByTitle') {
                         const [substring, xR, yR, wR, hR] = params.deep_unpack();
-                        const result = this._tileWindowByTitle(substring, xR, yR, wR, hR);
-                        invocation.return_value(new GLib.Variant('(b)', [result]));
+                        invocation.return_value(new GLib.Variant('(b)', [this._tileWindowByTitle(substring, xR, yR, wR, hR)]));
                     } else if (method === 'ListWindows') {
-                        const json = this._listWindows();
-                        invocation.return_value(new GLib.Variant('(s)', [json]));
+                        invocation.return_value(new GLib.Variant('(s)', [this._listWindows()]));
+                    } else if (method === 'GetActiveWindow') {
+                        invocation.return_value(new GLib.Variant('(s)', [this._getActiveWindow()]));
+                    } else if (method === 'MoveWindowByTitle') {
+                        const [substring, x, y] = params.deep_unpack();
+                        invocation.return_value(new GLib.Variant('(b)', [this._moveWindowByTitle(substring, x, y)]));
+                    } else if (method === 'MinimizeByTitle') {
+                        const substring = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(b)', [this._minimizeByTitle(substring)]));
+                    } else if (method === 'CloseByTitle') {
+                        const substring = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(b)', [this._closeByTitle(substring)]));
+                    } else if (method === 'MoveToWorkspace') {
+                        const [substring, ws] = params.deep_unpack();
+                        invocation.return_value(new GLib.Variant('(b)', [this._moveToWorkspace(substring, ws)]));
+                    } else if (method === 'TileBatch') {
+                        const json = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(s)', [this._tileBatch(json)]));
                     } else {
                         invocation.return_error_literal(
                             Gio.DBusError, Gio.DBusError.UNKNOWN_METHOD,
@@ -109,19 +153,13 @@ export default class DjGnomeFocus extends Extension {
     }
 
     _focusApp(appId) {
-        const tracker = Shell.WindowTracker.get_default();
         const app = Shell.AppSystem.get_default().lookup_app(appId);
         if (!app)
             return false;
-
         const windows = app.get_windows();
         if (windows.length === 0)
             return false;
-
-        // Focus the most recently used window
-        const win = windows[0];
-        const time = global.get_current_time();
-        win.activate(time);
+        windows[0].activate(global.get_current_time());
         return true;
     }
 
@@ -134,9 +172,13 @@ export default class DjGnomeFocus extends Extension {
         return null;
     }
 
-    _focusTitle(substring) {
+    _findByTitle(substring) {
         const lc = substring.toLowerCase();
-        const win = this._findWindow(w => (w.get_title() || '').toLowerCase().includes(lc));
+        return this._findWindow(w => (w.get_title() || '').toLowerCase().includes(lc));
+    }
+
+    _focusTitle(substring) {
+        const win = this._findByTitle(substring);
         if (!win)
             return false;
         win.activate(global.get_current_time());
@@ -164,10 +206,6 @@ export default class DjGnomeFocus extends Extension {
         return true;
     }
 
-    // Positions a window owned by `pid` to the rect described by 0..1 ratios
-    // of the primary monitor's work area. Returns false if no matching window.
-    // Note: GApplication-backed apps (Ptyxis, gnome-terminal) report the daemon
-    // PID, not the launcher PID — use TileWindowByTitle for those.
     _tileWindowByPid(pid, xRatio, yRatio, wRatio, hRatio) {
         const target = this._findWindow(w => w.get_pid() === pid);
         if (!target)
@@ -175,20 +213,13 @@ export default class DjGnomeFocus extends Extension {
         return this._tileTo(target, xRatio, yRatio, wRatio, hRatio);
     }
 
-    // Like TileWindowByPid but matches the first window whose title contains
-    // `substring` (case-insensitive). Works for GApplication-backed apps where
-    // PID matching fails. Pair with launchers that set unique titles (e.g.
-    // `ptyxis --title "DJTile-3" --new-window`).
     _tileWindowByTitle(substring, xRatio, yRatio, wRatio, hRatio) {
-        const lc = substring.toLowerCase();
-        const target = this._findWindow(w => (w.get_title() || '').toLowerCase().includes(lc));
+        const target = this._findByTitle(substring);
         if (!target)
             return false;
         return this._tileTo(target, xRatio, yRatio, wRatio, hRatio);
     }
 
-    // Dump all visible windows as JSON. Useful for CLI debugging — e.g.
-    // "why didn't TileWindowByTitle match?" → list and inspect the actual titles.
     _listWindows() {
         const out = [];
         for (const actor of global.get_window_actors()) {
@@ -201,5 +232,94 @@ export default class DjGnomeFocus extends Extension {
             });
         }
         return JSON.stringify(out);
+    }
+
+    _getActiveWindow() {
+        const win = global.display.get_focus_window();
+        if (!win)
+            return JSON.stringify(null);
+        const rect = win.get_frame_rect();
+        return JSON.stringify({
+            wm_class: win.get_wm_class() || '',
+            title: win.get_title() || '',
+            pid: win.get_pid(),
+            id: win.get_id(),
+            x: rect.x, y: rect.y, w: rect.width, h: rect.height,
+            monitor: win.get_monitor(),
+        });
+    }
+
+    _moveWindowByTitle(substring, x, y) {
+        const target = this._findByTitle(substring);
+        if (!target)
+            return false;
+        try {
+            target.unmaximize(Meta.MaximizeFlags.BOTH);
+        } catch (_e) {
+            // ignore
+        }
+        const rect = target.get_frame_rect();
+        target.move_resize_frame(true, x, y, rect.width, rect.height);
+        return true;
+    }
+
+    _minimizeByTitle(substring) {
+        const target = this._findByTitle(substring);
+        if (!target)
+            return false;
+        target.minimize();
+        return true;
+    }
+
+    _closeByTitle(substring) {
+        const target = this._findByTitle(substring);
+        if (!target)
+            return false;
+        target.delete(global.get_current_time());
+        return true;
+    }
+
+    _moveToWorkspace(substring, wsIndex) {
+        const target = this._findByTitle(substring);
+        if (!target)
+            return false;
+        const wsCount = global.workspace_manager.get_n_workspaces();
+        if (wsIndex < 0 || wsIndex >= wsCount)
+            return false;
+        target.change_workspace_by_index(wsIndex, false);
+        return true;
+    }
+
+    // Atomic batch tile. Input: JSON array of {title, x, y, w, h} (ratios).
+    // Output: JSON {placed: N, failed: [titles]}. One D-Bus round trip
+    // instead of N — useful for the 8-window grid which previously made
+    // 8 sequential calls with mid-loop races.
+    _tileBatch(json) {
+        let items;
+        try {
+            items = JSON.parse(json);
+        } catch (e) {
+            return JSON.stringify({error: `bad json: ${e.message}`, placed: 0, failed: []});
+        }
+        if (!Array.isArray(items))
+            return JSON.stringify({error: 'expected array', placed: 0, failed: []});
+
+        const failed = [];
+        let placed = 0;
+        for (const item of items) {
+            const {title, x, y, w, h} = item;
+            const target = this._findByTitle(title);
+            if (!target) {
+                failed.push(title);
+                continue;
+            }
+            try {
+                this._tileTo(target, x, y, w, h);
+                placed += 1;
+            } catch (e) {
+                failed.push(title);
+            }
+        }
+        return JSON.stringify({placed, failed});
     }
 }

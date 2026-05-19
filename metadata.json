@@ -1,7 +1,7 @@
 {
   "uuid": "dj-gnome-focus@djmsqrvve",
   "name": "DJ GNOME Focus",
-  "description": "D-Bus window-control service for Wayland. Focus by app/title, tile by PID or title, list windows. Used by dj-cli (`dj video focus`, `dj terminals grid`).",
+  "description": "D-Bus window-control service for Wayland. Focus/tile/move/minimize/close/list windows + atomic batch tile + active-window introspection. Used by dj-cli (`dj windows`, `dj video focus`, `dj terminals grid`).",
   "shell-version": ["47", "48", "49", "50"],
-  "version": 3
+  "version": 4
 }
