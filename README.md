@@ -54,13 +54,15 @@ Future homes still on the table:
 
 ## Install
 
-From the umbrella (`~/dev/gnome-extensions/`):
-
 ```bash
-./install.sh
+./install.sh              # symlink + compile schemas + enable
+./install.sh --uninstall  # disable + unlink (source untouched)
+./install.sh --reload     # disable + enable cycle (no symlink change)
 ```
 
-This symlinks the repo into `~/.local/share/gnome-shell/extensions/dj-gnome-focus@djmsqrvve` and enables it. Log out + back in on Wayland to reload.
+Or via the umbrella `~/dev/gnome-extensions/install.sh` to install **all** dj-* extensions at once (delegates to each member's `install.sh`).
+
+After install, log out + back in on Wayland (or `Alt+F2` `r` on X11) for GNOME Shell to pick up the symlink. UUID: `dj-gnome-focus@djmsqrvve`.
 
 ## License
 
