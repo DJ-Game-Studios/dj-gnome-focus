@@ -214,7 +214,7 @@ export default class DjGnomeFocus extends Extension {
         // Unmaximize unconditionally — no-op if not maximized. Avoids API drift
         // on get_maximized()/maximized_horizontally between Meta versions.
         try {
-            target.unmaximize(Meta.MaximizeFlags.BOTH);
+            target.unmaximize();
         } catch (_e) {
             // some Meta builds throw if already non-maximized; safe to ignore
         }
@@ -270,7 +270,7 @@ export default class DjGnomeFocus extends Extension {
         if (!target)
             return false;
         try {
-            target.unmaximize(Meta.MaximizeFlags.BOTH);
+            target.unmaximize();
         } catch (_e) {
             // ignore
         }
@@ -337,7 +337,7 @@ export default class DjGnomeFocus extends Extension {
         if (!target)
             return false;
         try {
-            target.unmaximize(Meta.MaximizeFlags.BOTH);
+            target.unmaximize();
         } catch (_e) {
             // ignore
         }

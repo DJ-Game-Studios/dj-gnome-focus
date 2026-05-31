@@ -2,7 +2,9 @@
 
 Live bugs + workarounds. Update when fixed; don't remove the entry — strike through with a "fixed in v<N>" suffix.
 
-## Tile path fails silently on GNOME 50 (Wayland) — current as of 2026-05-19
+## ~~Tile path fails silently on GNOME 50 (Wayland) — current as of 2026-05-19~~
+
+**Fixed in v8** — `unmaximize()` arg removed for GNOME 50 compat.
 
 **Symptom:** `dj terminals grid` (and any consumer of `TileWindowByTitle` / `TileWindowByPid`) reports `[ok]` for each window and `Placed N/N windows.`, but visibly the windows end up:
 
@@ -15,8 +17,8 @@ Same applies to the GUI consumer (`dj-gnome-status` extension → Quick Actions 
 
 1. **`Meta.Window.unmaximize()` no-arg drift.** On GNOME Shell 50 / Mutter 50.1 (current target), `Meta.Window.unmaximize()` takes ZERO arguments. The extension code calls `target.unmaximize(Meta.MaximizeFlags.BOTH)` in 3 places:
    - `extension.js:217` — inside `_tileWindowByTitle`
-   - `extension.js:273` — inside `_tileWindowByPid`
-   - `extension.js:340` — inside `_moveWindowByTitle`
+   - `extension.js:273` — inside `_moveWindowByTitle`
+   - `extension.js:340` — inside `_tileByTitlePixels`
 
    Journal evidence:
    ```
