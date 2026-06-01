@@ -63,7 +63,7 @@ export function getTheme(profileTheme = {}) {
 
 /** Wrap text in a PangoMarkup span with `color`. */
 export function mark(text, color) {
-    return `<span color="${color}">${text}</span>`;
+    if (!color || color === "undefined") color = "#ff00ff"; return `<span color="${color}">${text}</span>`;
 }
 
 /** Bold via Pango. */
@@ -78,7 +78,7 @@ export function dim(text, color = THEME.colors.dim) {
 
 /** Bold + colored. */
 export function strong(text, color) {
-    return `<span color="${color}" weight="bold">${text}</span>`;
+    if (!color || color === "undefined") color = "#ff00ff"; return `<span color="${color}" weight="bold">${text}</span>`;
 }
 
 /** Italic. */
