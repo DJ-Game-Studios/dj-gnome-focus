@@ -29,7 +29,7 @@ Active integrations:
 - `dj-cli/dj_cli/commands/video.py` — `dj video focus <pattern>` uses `FocusTitle`.
 - `dj-cli/dj_cli/commands/terminals.py` — `dj terminals grid [preset]` uses `TileWindowByTitle` (PID-matching path is dormant; left in place for non-GApplication apps). Each Ptyxis window is launched with `--title "DJTile-N"` and matched by that unique title. Default 8 windows in 4×2 (OPEN_ITEMS #233's 1/8-tile convention); presets: `quad`, `duo`, `tower`, `six`, `wide`, `stack`. `dj terminals list-windows` uses `ListWindows`.
 - `dj-cli/dj_cli/commands/windows_cmd.py` — `dj windows {list,active,focus,tile,move,minimize,close,workspace,tile-batch}` is the full surface. Backed by `dj_cli/windows.py` PyGObject `Gio.DBusProxy` client.
-- `dj-mcp/dj_mcp/tools/windows.py` — 6 window tools + 2 mouse-warp tools registered as `dj_window_*` / `dj_mouse_warp_*` MCP tools.
+- `mcp/core/desktopmng/desktop_mcp/tools/windows.py` — window + mouse-warp tools registered as `dj_window_*` / `dj_mouse_warp_*` MCP tools (the old `dj-mcp` monolith was decomposed into `mcp/core/desktopmng/` on 2026-05-26).
 - `dj-gnome-status` (top-bar) — Quick-actions submenu spawns `dj display N` / `dj terminals grid ...` / mouse-warp toggle.
 
 ## Method surface (current)
