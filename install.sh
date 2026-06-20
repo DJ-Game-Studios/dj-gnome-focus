@@ -7,7 +7,7 @@
 # with the umbrella installer at ~/dev/gnome-extensions/install.sh.
 #
 # Why per-extension? So each extension is self-installable on hosts that
-# don't carry the umbrella ~/dev parent repo (e.g. node-6 currently).
+# don't carry the umbrella ~/dev parent repo (e.g. the retired box).
 # See master-track/handoffs/2026-05-20-cross-fleet-git-status-arc.md
 # (TODO-7 for the umbrella-asymmetry context).
 #
