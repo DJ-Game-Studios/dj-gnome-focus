@@ -11,7 +11,18 @@ function runAll() {
     testBareDjSpawn();
     testSharedModules();
     testDisableSignals();
+    testFocusByStableIdSurface();
     console.log("All assertions passed!");
+}
+
+function testFocusByStableIdSurface() {
+    const content = fs.readFileSync(path.join(projectDir, 'extension.js'), 'utf8');
+    assert(content.includes('<method name="FocusId">'), 'D-Bus XML must expose FocusId');
+    assert(content.includes('<arg type="u" direction="in" name="windowId"/>'),
+        'FocusId must accept a uint32 Mutter window ID');
+    assert(content.includes("method === 'FocusId'"), 'D-Bus dispatch must handle FocusId');
+    assert(content.includes('w.get_id() === windowId'), 'FocusId must match the stable Mutter ID');
+    console.log('  ✔ stable window-ID focus surface present');
 }
 
 function testMetadata() {

@@ -4,6 +4,7 @@
  * Methods on org.gnome.Shell.Extensions.DjFocus:
  *   FocusApp(appId: string) → boolean
  *   FocusTitle(substring: string) → boolean
+ *   FocusId(windowId: uint32) → boolean
  *   TileWindowByPid(pid: int32, xRatio, yRatio, wRatio, hRatio: double) → boolean
  *   TileWindowByTitle(substring: string, xRatio, yRatio, wRatio, hRatio: double) → boolean
  *   ListWindows() → string  (JSON: [{wm_class, title, pid, id}, ...])
@@ -36,6 +37,10 @@ const IFACE_XML = `
     </method>
     <method name="FocusTitle">
       <arg type="s" direction="in" name="substring"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
+    <method name="FocusId">
+      <arg type="u" direction="in" name="windowId"/>
       <arg type="b" direction="out" name="success"/>
     </method>
     <method name="TileWindowByPid">
@@ -114,6 +119,9 @@ export default class DjGnomeFocus extends Extension {
                     } else if (method === 'FocusTitle') {
                         const substring = params.deep_unpack()[0];
                         invocation.return_value(new GLib.Variant('(b)', [this._focusTitle(substring)]));
+                    } else if (method === 'FocusId') {
+                        const windowId = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(b)', [this._focusId(windowId)]));
                     } else if (method === 'TileWindowByPid') {
                         const [pid, xR, yR, wR, hR] = params.deep_unpack();
                         invocation.return_value(new GLib.Variant('(b)', [this._tileWindowByPid(pid, xR, yR, wR, hR)]));
@@ -195,6 +203,14 @@ export default class DjGnomeFocus extends Extension {
 
     _focusTitle(substring) {
         const win = this._findByTitle(substring);
+        if (!win)
+            return false;
+        win.activate(global.get_current_time());
+        return true;
+    }
+
+    _focusId(windowId) {
+        const win = this._findWindow(w => w.get_id() === windowId);
         if (!win)
             return false;
         win.activate(global.get_current_time());

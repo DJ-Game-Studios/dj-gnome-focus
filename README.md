@@ -1,18 +1,19 @@
 # DJ GNOME Focus
 
-D-Bus window-control service for GNOME Shell on Wayland. Exposes five methods on `org.gnome.Shell.Extensions.DjFocus`:
+D-Bus window-control service for GNOME Shell on Wayland. Exposes focused window-management methods on `org.gnome.Shell.Extensions.DjFocus`:
 
 | Method | Args | Returns |
 |--------|------|---------|
 | `FocusApp(appId: string)` | desktop ID (e.g. `code_code.desktop`) | `bool` — true if a window was activated |
 | `FocusTitle(substring: string)` | case-insensitive title substring | `bool` |
+| `FocusId(windowId: uint32)` | stable Mutter ID from `ListWindows`/`GetActiveWindow` | `bool` |
 | `TileWindowByPid(pid: int, xR, yR, wR, hR: double)` | owning process PID + 0..1 ratios of primary work area | `bool` — fails for GApplication-backed apps (use title instead) |
 | `TileWindowByTitle(substring: string, xR, yR, wR, hR: double)` | title substring + 0..1 ratios | `bool` — robust against GApplication daemon PID indirection |
 | `ListWindows()` | — | `string` — JSON array of `{wm_class, title, pid, id}` for every visible window |
 
 ## Why
 
-Wayland forbids arbitrary window manipulation from unprivileged clients (wmctrl, xdotool, etc.). A GNOME Shell extension runs *inside* Mutter, so it can. This extension exposes those capabilities over session D-Bus so CLIs and hooks can raise + position windows.
+Wayland forbids arbitrary window manipulation from unprivileged clients (wmctrl, xdotool, etc.). A GNOME Shell extension runs *inside* Mutter, so it can. This extension exposes those capabilities over session D-Bus so CLIs and hooks can raise + position windows. Use `FocusId` to return to an exact window even if its title changes during an operation.
 
 ## Usage
 

@@ -38,6 +38,7 @@ Active integrations:
 |---|---|---|
 | `FocusApp` | `(s) → b` | Lookup by GApp ID, focus most-recent window |
 | `FocusTitle` | `(s) → b` | First window whose title contains substring (case-insensitive) |
+| `FocusId` | `(u) → b` | Exact Mutter window ID; use for focus restoration across changing titles |
 | `TileWindowByPid` | `(i,d,d,d,d) → b` | Match by PID; fails for GApplication-backed apps (Ptyxis, gnome-terminal, nautilus) since Mutter reports the daemon PID |
 | `TileWindowByTitle` | `(s,d,d,d,d) → b` | Match by title substring; pair with launchers that set unique titles |
 | `ListWindows` | `() → s` | JSON array of `{wm_class, title, pid, id}` for every visible window |

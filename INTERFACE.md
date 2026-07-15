@@ -55,6 +55,14 @@ gdbus call --session \
   "Helix2000"
 ```
 
+### FocusId
+
+Focus the exact Mutter window ID returned by `ListWindows` or `GetActiveWindow`. Unlike a title matcher, the ID remains stable while terminal spinners, document names, and game modes change the title.
+
+**Signature**: `FocusId(windowId: uint32) → boolean`
+
+Use this as the focus-back primitive for a bounded UI transaction: snapshot the active ID, perform the operation on another window, call `FocusId`, then verify `GetActiveWindow` reports the original ID/PID/class.
+
 ### TileWindowByPid
 
 Move and resize a window — identified by its owning process PID — to a rectangle expressed as 0..1 ratios of the primary monitor's active work area.
@@ -188,6 +196,7 @@ Absolute-pixel placement. Bypasses the primary-work-area math of `TileWindowByTi
 | `dj windows list` | `ListWindows` |
 | `dj windows active` | `GetActiveWindow` |
 | `dj windows focus <pattern>` | `FocusTitle` |
+| `dj windows focus-id <window-id>` | `FocusId` |
 | `dj windows tile <pattern> X Y W H` | `TileWindowByTitle` |
 | `dj windows move <pattern> X Y` | `MoveWindowByTitle` |
 | `dj windows minimize <pattern>` | `MinimizeByTitle` |
