@@ -7,7 +7,7 @@
  *   FocusId(windowId: uint32) → boolean
  *   TileWindowByPid(pid: int32, xRatio, yRatio, wRatio, hRatio: double) → boolean
  *   TileWindowByTitle(substring: string, xRatio, yRatio, wRatio, hRatio: double) → boolean
- *   ListWindows() → string  (JSON: [{wm_class, title, pid, id}, ...])
+ *   ListWindows() → string  (JSON: [{wm_class, title, pid, id, workspace, monitor}, ...])
  *   GetActiveWindow() → string  (JSON: {wm_class, title, pid, id, x, y, w, h, monitor})
  *   MoveWindowByTitle(substring: string, x, y: int32) → boolean
  *   MinimizeByTitle(substring: string) → boolean
@@ -16,6 +16,9 @@
  *   TileBatch(json: string) → string
  *       Input  : [{title, x, y, w, h}, ...]  (ratios 0..1 of primary work area)
  *       Output : {placed: N, failed: [titles...]}
+ *   PointerStatus() → string
+ *   PlanPointerClick(requestJson: string) → string
+ *   CommitPointerClick(planId: string) → string
  *
  * Wayland forbids arbitrary window manipulation from unprivileged clients.
  * Extensions run inside Mutter, so they can.
@@ -23,10 +26,17 @@
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
+
+const POINTER_SCHEMA_VERSION = 1;
+const POINTER_TTL_DEFAULT_MS = 10000;
+const POINTER_TTL_MIN_MS = 1000;
+const POINTER_TTL_MAX_MS = 30000;
+const POINTER_UNCHANGED_TOLERANCE_PX = 2;
 
 const IFACE_XML = `
 <node>
@@ -99,13 +109,28 @@ const IFACE_XML = `
       <arg type="i" direction="in" name="h"/>
       <arg type="b" direction="out" name="success"/>
     </method>
+    <method name="PointerStatus">
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="PlanPointerClick">
+      <arg type="s" direction="in" name="requestJson"/>
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="CommitPointerClick">
+      <arg type="s" direction="in" name="planId"/>
+      <arg type="s" direction="out" name="json"/>
+    </method>
   </interface>
 </node>`;
 
 export default class DjGnomeFocus extends Extension {
     _dbusId = null;
+    _pointerPlan = null;
+    _virtualPointer = null;
 
     enable() {
+        this._pointerPlan = null;
+        this._virtualPointer = null;
         this._dbusId = Gio.DBus.session.register_object(
             '/org/gnome/Shell/Extensions/DjFocus',
             Gio.DBusNodeInfo.new_for_xml(IFACE_XML).interfaces[0],
@@ -152,6 +177,14 @@ export default class DjGnomeFocus extends Extension {
                     } else if (method === 'TileByTitlePixels') {
                         const [substring, x, y, w, h] = params.deep_unpack();
                         invocation.return_value(new GLib.Variant('(b)', [this._tileByTitlePixels(substring, x, y, w, h)]));
+                    } else if (method === 'PointerStatus') {
+                        invocation.return_value(new GLib.Variant('(s)', [this._pointerStatus()]));
+                    } else if (method === 'PlanPointerClick') {
+                        const requestJson = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(s)', [this._planPointerClick(requestJson)]));
+                    } else if (method === 'CommitPointerClick') {
+                        const planId = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(s)', [this._commitPointerClick(planId)]));
                     } else {
                         invocation.return_error_literal(
                             Gio.DBusError, Gio.DBusError.UNKNOWN_METHOD,
@@ -174,6 +207,8 @@ export default class DjGnomeFocus extends Extension {
             Gio.DBus.session.unregister_object(this._dbusId);
             this._dbusId = null;
         }
+        this._pointerPlan = null;
+        this._virtualPointer = null;
     }
 
     _focusApp(appId) {
@@ -194,6 +229,235 @@ export default class DjGnomeFocus extends Extension {
                 return win;
         }
         return null;
+    }
+
+    _windowSnapshot(win) {
+        const rect = win.get_frame_rect();
+        return {
+            id: win.get_id(),
+            title: win.get_title() || '',
+            wm_class: win.get_wm_class() || '',
+            pid: win.get_pid(),
+            rect: {x: rect.x, y: rect.y, w: rect.width, h: rect.height},
+        };
+    }
+
+    _pointerPosition() {
+        const [x, y] = global.get_pointer();
+        return {x, y};
+    }
+
+    _clearExpiredPointerPlan(nowUs = GLib.get_monotonic_time()) {
+        if (this._pointerPlan && nowUs > this._pointerPlan.expiresUs)
+            this._pointerPlan = null;
+    }
+
+    _pointerStatus() {
+        this._clearExpiredPointerPlan();
+        const seat = Clutter.get_default_backend().get_default_seat();
+        return JSON.stringify({
+            ok: true,
+            schema_version: POINTER_SCHEMA_VERSION,
+            available: typeof seat.create_virtual_device === 'function',
+            pointer: this._pointerPosition(),
+            pending_plan: this._pointerPlan ? {
+                intent: this._pointerPlan.intent,
+                target_window_id: this._pointerPlan.target.id,
+                expires_in_ms: Math.max(0, Math.floor(
+                    (this._pointerPlan.expiresUs - GLib.get_monotonic_time()) / 1000)),
+            } : null,
+            constraints: {
+                left_click_only: true,
+                exact_window_identity: true,
+                unchanged_geometry: true,
+                target_must_be_active: true,
+                pointer_must_be_unchanged: true,
+                plan_ttl_ms: {min: POINTER_TTL_MIN_MS, max: POINTER_TTL_MAX_MS},
+            },
+        });
+    }
+
+    _parsePointerClickRequest(requestJson) {
+        let request;
+        try {
+            request = JSON.parse(requestJson);
+        } catch (e) {
+            throw new Error(`invalid_request_json: ${e.message}`);
+        }
+        if (!request || typeof request !== 'object' || Array.isArray(request))
+            throw new Error('invalid_request: expected an object');
+
+        const allowed = new Set([
+            'schema_version', 'window_id', 'expected_title', 'expected_wm_class',
+            'x_ratio', 'y_ratio', 'intent', 'ttl_ms',
+        ]);
+        const unknown = Object.keys(request).filter(key => !allowed.has(key));
+        if (unknown.length > 0)
+            throw new Error(`invalid_request: unknown fields: ${unknown.join(', ')}`);
+        if (request.schema_version !== POINTER_SCHEMA_VERSION)
+            throw new Error(`unsupported_schema_version: ${request.schema_version}`);
+        if (!Number.isInteger(request.window_id) || request.window_id < 1 || request.window_id > 0xffffffff)
+            throw new Error('invalid_window_id');
+        if (typeof request.expected_title !== 'string' || request.expected_title.length < 1 || request.expected_title.length > 256)
+            throw new Error('invalid_expected_title');
+        if (typeof request.expected_wm_class !== 'string' || request.expected_wm_class.length < 1 || request.expected_wm_class.length > 128)
+            throw new Error('invalid_expected_wm_class');
+        for (const key of ['x_ratio', 'y_ratio']) {
+            if (typeof request[key] !== 'number' || !Number.isFinite(request[key]) || request[key] < 0.01 || request[key] > 0.99)
+                throw new Error(`invalid_${key}: expected 0.01..0.99`);
+        }
+        if (typeof request.intent !== 'string' || request.intent.length < 1 || request.intent.length > 120)
+            throw new Error('invalid_intent');
+        const ttlMs = request.ttl_ms ?? POINTER_TTL_DEFAULT_MS;
+        if (!Number.isInteger(ttlMs) || ttlMs < POINTER_TTL_MIN_MS || ttlMs > POINTER_TTL_MAX_MS)
+            throw new Error(`invalid_ttl_ms: expected ${POINTER_TTL_MIN_MS}..${POINTER_TTL_MAX_MS}`);
+        return {...request, ttl_ms: ttlMs};
+    }
+
+    _planPointerClick(requestJson) {
+        const request = this._parsePointerClickRequest(requestJson);
+        const target = this._findWindow(w => w.get_id() === request.window_id);
+        if (!target)
+            throw new Error('target_window_not_found');
+        const snapshot = this._windowSnapshot(target);
+        if (snapshot.title !== request.expected_title)
+            throw new Error('target_title_mismatch');
+        if (snapshot.wm_class !== request.expected_wm_class)
+            throw new Error('target_wm_class_mismatch');
+        if (snapshot.rect.w < 1 || snapshot.rect.h < 1)
+            throw new Error('target_geometry_invalid');
+
+        const point = {
+            x: Math.min(snapshot.rect.x + snapshot.rect.w - 1,
+                snapshot.rect.x + Math.floor(request.x_ratio * snapshot.rect.w)),
+            y: Math.min(snapshot.rect.y + snapshot.rect.h - 1,
+                snapshot.rect.y + Math.floor(request.y_ratio * snapshot.rect.h)),
+            x_ratio: request.x_ratio,
+            y_ratio: request.y_ratio,
+            space: 'desktop-logical-px',
+        };
+        const active = global.display.get_focus_window();
+        const activeId = active ? active.get_id() : null;
+        const nowUs = GLib.get_monotonic_time();
+        const plan = {
+            id: GLib.uuid_string_random(),
+            intent: request.intent,
+            target: snapshot,
+            point,
+            pointerBefore: this._pointerPosition(),
+            expiresUs: nowUs + request.ttl_ms * 1000,
+        };
+        this._pointerPlan = plan;
+        return JSON.stringify({
+            ok: true,
+            schema_version: POINTER_SCHEMA_VERSION,
+            state: 'planned',
+            side_effect: false,
+            plan_id: plan.id,
+            intent: plan.intent,
+            expires_in_ms: request.ttl_ms,
+            committable: activeId === snapshot.id,
+            target: snapshot,
+            point,
+            pointer_before: plan.pointerBefore,
+            checks: {
+                exact_window_id: true,
+                exact_title: true,
+                exact_wm_class: true,
+                target_active: activeId === snapshot.id,
+            },
+        });
+    }
+
+    _commitPointerClick(planId) {
+        if (typeof planId !== 'string' || planId.length < 1 || planId.length > 128)
+            throw new Error('invalid_plan_id');
+        const plan = this._pointerPlan;
+        this._pointerPlan = null;
+        if (!plan || plan.id !== planId)
+            throw new Error('unknown_or_consumed_plan');
+        const nowUs = GLib.get_monotonic_time();
+        if (nowUs > plan.expiresUs)
+            throw new Error('expired_plan');
+
+        const target = this._findWindow(w => w.get_id() === plan.target.id);
+        if (!target)
+            throw new Error('target_window_not_found');
+        const current = this._windowSnapshot(target);
+        if (current.title !== plan.target.title || current.wm_class !== plan.target.wm_class)
+            throw new Error('target_identity_changed');
+        const rectKeys = ['x', 'y', 'w', 'h'];
+        if (rectKeys.some(key => current.rect[key] !== plan.target.rect[key]))
+            throw new Error('target_geometry_changed');
+        const active = global.display.get_focus_window();
+        if (!active || active.get_id() !== plan.target.id)
+            throw new Error('target_not_active');
+        const pointer = this._pointerPosition();
+        if (Math.hypot(pointer.x - plan.pointerBefore.x, pointer.y - plan.pointerBefore.y) > POINTER_UNCHANGED_TOLERANCE_PX)
+            throw new Error('human_pointer_moved');
+
+        const seat = Clutter.get_default_backend().get_default_seat();
+        if (typeof seat.create_virtual_device !== 'function')
+            throw new Error('virtual_pointer_unavailable');
+        if (!this._virtualPointer)
+            this._virtualPointer = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        if (!this._virtualPointer)
+            throw new Error('virtual_pointer_creation_failed');
+
+        // Device creation may allocate or yield inside Mutter. Recheck the
+        // mutable desktop state once more immediately before the first event.
+        const finalTarget = this._findWindow(w => w.get_id() === plan.target.id);
+        if (!finalTarget)
+            throw new Error('target_window_not_found');
+        const finalSnapshot = this._windowSnapshot(finalTarget);
+        if (finalSnapshot.title !== plan.target.title ||
+            finalSnapshot.wm_class !== plan.target.wm_class ||
+            rectKeys.some(key => finalSnapshot.rect[key] !== plan.target.rect[key]))
+            throw new Error('target_changed_before_input');
+        const finalActive = global.display.get_focus_window();
+        if (!finalActive || finalActive.get_id() !== plan.target.id)
+            throw new Error('target_not_active_before_input');
+        const finalPointer = this._pointerPosition();
+        if (Math.hypot(finalPointer.x - plan.pointerBefore.x,
+            finalPointer.y - plan.pointerBefore.y) > POINTER_UNCHANGED_TOLERANCE_PX)
+            throw new Error('human_pointer_moved_before_input');
+
+        let pressed = false;
+        try {
+            this._virtualPointer.notify_absolute_motion(nowUs, plan.point.x, plan.point.y);
+            this._virtualPointer.notify_button(
+                nowUs + 1000, Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+            pressed = true;
+        } finally {
+            if (pressed) {
+                try {
+                    this._virtualPointer.notify_button(
+                        nowUs + 2000, Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+                } catch (e) {
+                    // Drop our reference so a subsequent plan cannot reuse a
+                    // device whose button state is uncertain.
+                    this._virtualPointer = null;
+                    throw new Error(`button_release_failed: ${e.message}`);
+                }
+            }
+        }
+
+        return JSON.stringify({
+            ok: true,
+            schema_version: POINTER_SCHEMA_VERSION,
+            state: 'committed',
+            side_effect: true,
+            plan_id: plan.id,
+            intent: plan.intent,
+            target: current,
+            point: plan.point,
+            checks: {
+                exact_window_identity: true,
+                unchanged_geometry: true,
+                target_active: true,
+                pointer_unchanged: true,
+            },
+        });
     }
 
     _findByTitle(substring) {
@@ -261,6 +525,10 @@ export default class DjGnomeFocus extends Extension {
                 title: w.get_title() || '',
                 pid: w.get_pid(),
                 id: w.get_id(),
+                // -1 = on-all-workspaces or unset; otherwise the 0-based index
+                workspace: w.is_on_all_workspaces() ? -1
+                    : (w.get_workspace() ? w.get_workspace().index() : -1),
+                monitor: w.get_monitor(),
             });
         }
         return JSON.stringify(out);

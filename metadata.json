@@ -1,14 +1,14 @@
 {
   "uuid": "dj-gnome-focus@djmsqrvve",
   "name": "DJ GNOME Focus",
-  "description": "D-Bus window-control service for Wayland. Focus/tile/move/minimize/close/list windows + atomic batch tile + active-window + monitor topology + absolute-pixel placement. Used by dj-cli (`dj windows`, `dj video focus`, `dj terminals grid`).",
+  "description": "D-Bus window-control service for Wayland. Focus/tile/list plus expiring two-phase exact-window left-click plans. Used by dj-cli and desktopmng MCP.",
   "shell-version": [
     "47",
     "48",
     "49",
     "50"
   ],
-  "version": 11,
+  "version": 13,
   "url": "https://github.com/DJ-Game-Studios/dj-gnome-focus",
   "license": "MIT"
 }
