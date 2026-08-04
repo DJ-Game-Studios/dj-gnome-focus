@@ -4,6 +4,12 @@
 
 The dj-gnome-focus GNOME Shell extension exposes a D-Bus interface for window focus operations on Wayland. This enables CLI tools and external scripts to programmatically switch focus to windows by app ID or title pattern.
 
+Agents do not call this interface directly. `~/dev/dj-cli` and
+`~/dev/mcp/core/desktopmng` are the serving implementations; focus-sensitive
+domain transactions are documented in
+`~/dev/mcp-dev/docs/DESKTOP_UI_VQA.md`. Pointer plan/commit remains pinned until
+a normal login loads the source and a bounded live acceptance is approved.
+
 ## Bus Details
 
 - **Bus Type**: Session bus
@@ -185,6 +191,54 @@ Absolute-pixel placement. Bypasses the primary-work-area math of `TileWindowByTi
 
 **Signature**: `TileByTitlePixels(substring: string, x: int32, y: int32, w: int32, h: int32) → boolean`
 
+### PointerStatus
+
+Read-only capability and pointer state. Reports whether Mutter exposes virtual
+pointer creation, current logical-pixel coordinates, whether a plan is pending,
+and the enforced safety constraints. The secret plan ID is never returned here.
+
+**Signature**: `PointerStatus() → string`
+
+### PlanPointerClick
+
+Create a no-input, expiring click plan for one exact Mutter window. The JSON
+request must contain only:
+
+```json
+{
+  "schema_version": 1,
+  "window_id": 123,
+  "expected_title": "Battle.net",
+  "expected_wm_class": "battle.net.exe",
+  "x_ratio": 0.175,
+  "y_ratio": 0.788,
+  "intent": "battle.net:account-menu",
+  "ttl_ms": 10000
+}
+```
+
+Coordinates are normalized inside the current window frame and must be within
+`0.01..0.99`. The response contains the exact target identity, geometry,
+resolved desktop logical pixel, pointer position, focus check, and a secret
+plan ID. Planning does not focus, move, click, or otherwise mutate the desktop.
+
+**Signature**: `PlanPointerClick(requestJson: string) → string`
+
+### CommitPointerClick
+
+Consume one plan exactly once. Before injecting anything, the extension
+rechecks expiry, stable window ID, exact title/class, unchanged frame geometry,
+the target's active focus, and that the human pointer has not moved by more
+than two pixels. It repeats the mutable-state checks immediately before input,
+then sends one primary-button click through Mutter's virtual pointer. A
+successful press always enters a `finally` release path; an uncertain release
+discards the virtual-device reference. Failed checks still consume the plan.
+
+**Signature**: `CommitPointerClick(planId: string) → string`
+
+The initial surface deliberately has no keyboard, drag, scroll, double-click,
+button selector, title matching, focus mutation, or arbitrary command input.
+
 ## Integration with dj-cli
 
 | dj-cli command | Method used |
@@ -215,6 +269,9 @@ Absolute-pixel placement. Bypasses the primary-work-area math of `TileWindowByTi
 | `dj_window_close` | `CloseByTitle` |
 | `dj_window_tile_batch` | `TileBatch` |
 | `dj_monitors_list` | `GetMonitors` (also via `dj video state --json` / Mutter DisplayConfig) |
+| `dj_pointer_status` | `PointerStatus` |
+| `dj_pointer_plan_click` | `PlanPointerClick` |
+| `dj_pointer_commit_click` | `CommitPointerClick` |
 
 ## Testing
 

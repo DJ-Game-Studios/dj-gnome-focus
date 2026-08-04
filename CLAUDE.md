@@ -4,6 +4,14 @@ GNOME Shell extension. Tiny surface — two files:
 - `metadata.json` — UUID, shell-version matrix
 - `extension.js` — registers a D-Bus interface on `/org/gnome/Shell/Extensions/DjFocus`
 
+The additive pointer surface is deliberately two-phase: `PlanPointerClick`
+performs no input and returns a secret, expiring plan ID; `CommitPointerClick`
+consumes it once after rechecking stable window ID, exact title/class,
+unchanged geometry, active focus, and unchanged human pointer position. The
+initial contract is primary-button single click only. Do not add keyboard,
+drag, scroll, double-click, sequences, or caller-selected shell commands
+without a separate safety review.
+
 ## When editing
 
 - Shell-version matrix is `["47", "48", "49", "50"]`. Do not narrow without checking `gnome-shell --version`.
@@ -50,6 +58,9 @@ Active integrations:
 | `TileBatch` | `(s) → s` | Atomic batch tile. Input: JSON `[{title, x, y, w, h}]` (0..1 ratios). Output: `{placed: N, failed: [titles]}`. One D-Bus round trip vs N |
 | `GetMonitors` | `() → s` | JSON `{primary: idx, count: N, monitors: [{index, primary, geometry, work_area, scale}]}`. Use for absolute-pixel tile math against non-primary monitors. |
 | `TileByTitlePixels` | `(s,i,i,i,i) → b` | Absolute-pixel placement. Bypasses the primary-work-area math of `TileWindowByTitle`. Useful when targeting non-primary monitors. |
+| `PointerStatus` | `() → s` | Read-only pointer capability/state; never exposes the pending commit plan ID. |
+| `PlanPointerClick` | `(s JSON) → s JSON` | Dry-run exact-window click plan using normalized in-window coordinates and a 1–30 second TTL. |
+| `CommitPointerClick` | `(s planId) → s JSON` | One-shot left click after all identity, geometry, focus, pointer, and expiry checks pass. |
 
 Hook integrations:
 - `~/.claude/hooks/notification-focus.sh` — calls `FocusTitle "claude"` on Stop hook to pop the Claude Code window when work finishes / needs attention. Wire into `settings.json` `Stop` hook to use.

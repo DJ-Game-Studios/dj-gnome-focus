@@ -12,7 +12,41 @@ function runAll() {
     testSharedModules();
     testDisableSignals();
     testFocusByStableIdSurface();
+    testPointerTwoPhaseSurface();
     console.log("All assertions passed!");
+}
+
+function testPointerTwoPhaseSurface() {
+    const content = fs.readFileSync(path.join(projectDir, 'extension.js'), 'utf8');
+    for (const method of ['PointerStatus', 'PlanPointerClick', 'CommitPointerClick']) {
+        assert(content.includes(`<method name="${method}">`), `${method} must be exported over D-Bus`);
+        assert(content.includes(`method === '${method}'`), `${method} must have a D-Bus dispatcher`);
+    }
+    assert(content.includes("import Clutter from 'gi://Clutter'"), 'pointer injection must use compositor Clutter');
+    assert(content.includes('create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE)'),
+        'commit must create a compositor virtual pointer');
+    assert(content.includes('notify_absolute_motion'), 'commit must move through the virtual pointer');
+    assert(content.includes('notify_button'), 'commit must press and release through the virtual pointer');
+    assert(content.includes('Clutter.BUTTON_PRIMARY'), 'the initial surface must be left-click only');
+    assert(!content.includes('notify_key('), 'the pointer bridge must not inject keyboard input');
+    assert(!content.includes('notify_keyval('), 'the pointer bridge must not inject key symbols');
+    assert(content.includes("throw new Error('target_geometry_changed')"),
+        'commit must reject geometry drift');
+    assert(content.includes("throw new Error('target_not_active')"),
+        'commit must require the exact target to remain active');
+    assert(content.includes("throw new Error('human_pointer_moved')"),
+        'commit must refuse after human pointer movement');
+    assert(content.includes("throw new Error('target_changed_before_input')"),
+        'commit must recheck the exact target immediately before input');
+    assert(content.includes('} finally {\n            if (pressed) {'),
+        'commit must always attempt button release after a successful press');
+    assert(content.includes('button_release_failed'),
+        'commit must report a failed release and discard the uncertain device');
+    assert(content.indexOf('this._pointerPlan = null;\n        if (!plan || plan.id !== planId)') <
+        content.indexOf('notify_absolute_motion'), 'the plan must be consumed before injection');
+    const statusBlock = content.slice(content.indexOf('_pointerStatus()'), content.indexOf('_parsePointerClickRequest'));
+    assert(!statusBlock.includes('plan_id:'), 'status must not disclose the commit capability');
+    console.log('  ✔ two-phase exact-window pointer surface present');
 }
 
 function testFocusByStableIdSurface() {
