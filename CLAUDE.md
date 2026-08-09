@@ -31,6 +31,11 @@ Wayland can't live-reload extensions. Options:
      --method org.gnome.Shell.Extensions.DjFocus.FocusTitle "Helix2000"
    ```
 
+Workspace-aware focus source changes require a normal Wayland login before
+live acceptance. The next bounded acceptance is documented in `README.md`;
+use the owning domain adapter so target activation and original-focus
+restoration are verified together.
+
 ## Integration callers (wire up when needed)
 
 Active integrations:
@@ -44,9 +49,9 @@ Active integrations:
 
 | Method | Signature | Notes |
 |---|---|---|
-| `FocusApp` | `(s) → b` | Lookup by GApp ID, focus most-recent window |
-| `FocusTitle` | `(s) → b` | First window whose title contains substring (case-insensitive) |
-| `FocusId` | `(u) → b` | Exact Mutter window ID; use for focus restoration across changing titles |
+| `FocusApp` | `(s) → b` | Lookup by GApp ID, focus most-recent window through workspace-aware `Main.activateWindow` |
+| `FocusTitle` | `(s) → b` | First window whose title contains substring (case-insensitive); switches to its workspace |
+| `FocusId` | `(u) → b` | Exact Mutter window ID with workspace switch; use for focus restoration across changing titles |
 | `TileWindowByPid` | `(i,d,d,d,d) → b` | Match by PID; fails for GApplication-backed apps (Ptyxis, gnome-terminal, nautilus) since Mutter reports the daemon PID |
 | `TileWindowByTitle` | `(s,d,d,d,d) → b` | Match by title substring; pair with launchers that set unique titles |
 | `ListWindows` | `() → s` | JSON array of `{wm_class, title, pid, id}` for every visible window |

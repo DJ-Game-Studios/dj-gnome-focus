@@ -16,7 +16,7 @@ D-Bus window-control service for GNOME Shell on Wayland. Exposes focused window-
 
 ## Why
 
-Wayland forbids arbitrary window manipulation from unprivileged clients (wmctrl, xdotool, etc.). A GNOME Shell extension runs *inside* Mutter, so it can. This extension exposes those capabilities over session D-Bus so CLIs and hooks can raise + position windows. Use `FocusId` to return to an exact window even if its title changes during an operation.
+Wayland forbids arbitrary window manipulation from unprivileged clients (wmctrl, xdotool, etc.). A GNOME Shell extension runs *inside* Mutter, so it can. This extension exposes those capabilities over session D-Bus so CLIs and hooks can raise + position windows. Focus routes use GNOME Shell's workspace-aware activation helper; use `FocusId` to return to an exact window even if its title changes during an operation.
 
 Pointer injection is a separate two-phase capability: planning is dry-run only,
 and commit is left-click-only with expiry plus exact identity, geometry, focus,
@@ -92,6 +92,29 @@ Future homes still on the table:
 Or via the umbrella `~/dev/gnome-extensions/install.sh` to install **all** dj-* extensions at once (delegates to each member's `install.sh`).
 
 After install, log out + back in on Wayland (or `Alt+F2` `r` on X11) for GNOME Shell to pick up the symlink. UUID: `dj-gnome-focus@djmsqrvve`.
+
+## Next normal-login acceptance — 2026-08-08
+
+The source-linked install now routes `FocusApp`, `FocusTitle`, and `FocusId`
+through GNOME Shell's workspace-aware `Main.activateWindow`. Static assertions
+pass, and same-workspace stable-ID focus/restore passed against WoW and Codex.
+The running Wayland Shell still has the older implementation loaded; do not
+force-reload it.
+
+After the next normal logout/login:
+
+1. Put an exact test target and the original terminal on different non-sticky
+   workspaces. `ListWindows` must report two different indexes `>= 0`; `-1`
+   means the window is visible on every workspace and does not test switching.
+2. Use the owning domain adapter, not raw D-Bus, to focus/capture/restore once.
+3. Require the target's exact stable ID to become active and the original exact
+   ID/PID/class to be restored, including across a changing terminal title.
+4. Re-read active focus and visually inspect the returned image.
+5. If the user chooses a third window, preserve it and require no published
+   capture.
+
+For the current WoW acceptance, the owning runbook is
+`~/dev/mcp-dev/docs/WOW_ADDON_DESKTOP_VQA.md`.
 
 ## License
 

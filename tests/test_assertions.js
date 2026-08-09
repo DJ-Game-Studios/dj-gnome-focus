@@ -56,6 +56,18 @@ function testFocusByStableIdSurface() {
         'FocusId must accept a uint32 Mutter window ID');
     assert(content.includes("method === 'FocusId'"), 'D-Bus dispatch must handle FocusId');
     assert(content.includes('w.get_id() === windowId'), 'FocusId must match the stable Mutter ID');
+    assert(content.includes('Main.activateWindow(windows[0])'),
+        'FocusApp must use the Shell workspace-aware activation helper');
+    const focusTitle = content.slice(content.indexOf('_focusTitle(substring) {'),
+        content.indexOf('_focusId(windowId) {'));
+    const focusId = content.slice(content.indexOf('_focusId(windowId) {'),
+        content.indexOf('_tileTo(target'));
+    assert(focusTitle.includes('Main.activateWindow(win)'),
+        'FocusTitle must switch to an off-workspace target before activation');
+    assert(focusId.includes('Main.activateWindow(win)'),
+        'FocusId must switch to an off-workspace target before activation');
+    assert(!focusTitle.includes('win.activate(') && !focusId.includes('win.activate('),
+        'focus methods must not bypass Shell workspace activation');
     console.log('  ✔ stable window-ID focus surface present');
 }
 

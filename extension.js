@@ -218,7 +218,7 @@ export default class DjGnomeFocus extends Extension {
         const windows = app.get_windows();
         if (windows.length === 0)
             return false;
-        windows[0].activate(global.get_current_time());
+        Main.activateWindow(windows[0]);
         return true;
     }
 
@@ -469,7 +469,7 @@ export default class DjGnomeFocus extends Extension {
         const win = this._findByTitle(substring);
         if (!win)
             return false;
-        win.activate(global.get_current_time());
+        Main.activateWindow(win);
         return true;
     }
 
@@ -477,7 +477,7 @@ export default class DjGnomeFocus extends Extension {
         const win = this._findWindow(w => w.get_id() === windowId);
         if (!win)
             return false;
-        win.activate(global.get_current_time());
+        Main.activateWindow(win);
         return true;
     }
 

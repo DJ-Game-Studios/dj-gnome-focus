@@ -2,7 +2,7 @@
 
 ## Overview
 
-The dj-gnome-focus GNOME Shell extension exposes a D-Bus interface for window focus operations on Wayland. This enables CLI tools and external scripts to programmatically switch focus to windows by app ID or title pattern.
+The dj-gnome-focus GNOME Shell extension exposes a D-Bus interface for window focus operations on Wayland. This enables CLI tools and external scripts to programmatically switch focus to windows by app ID or title pattern. Focus methods use GNOME Shell's workspace-aware activation helper, so an exact window on another workspace is activated without relocating it.
 
 Agents do not call this interface directly. `~/dev/dj-cli` and
 `~/dev/mcp/core/desktopmng` are the serving implementations; focus-sensitive
@@ -68,6 +68,11 @@ Focus the exact Mutter window ID returned by `ListWindows` or `GetActiveWindow`.
 **Signature**: `FocusId(windowId: uint32) → boolean`
 
 Use this as the focus-back primitive for a bounded UI transaction: snapshot the active ID, perform the operation on another window, call `FocusId`, then verify `GetActiveWindow` reports the original ID/PID/class.
+
+`FocusId`, `FocusTitle`, and `FocusApp` switch to the target's workspace through
+GNOME Shell before activation. Source changes become live only after a normal
+Wayland login; do not treat an installed symlink as proof that the running Shell
+loaded the new implementation.
 
 ### TileWindowByPid
 
