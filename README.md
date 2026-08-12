@@ -2,6 +2,8 @@
 
 A GNOME Shell extension that exposes precise window activation and tiling over D-Bus on Wayland.
 
+Built by [DJ Game Studios](https://github.com/DJ-Game-Studios) as part of the desktop-automation layer across our development and production boxes.
+
 Wayland intentionally prevents ordinary desktop applications from manipulating other windows. Because this extension runs inside GNOME Shell, approved local tools can request operations through a small, explicit interface instead of relying on X11-only utilities such as `wmctrl` or `xdotool`.
 
 ## Capabilities
