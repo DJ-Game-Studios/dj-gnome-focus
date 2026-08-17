@@ -294,10 +294,22 @@ JSON**, not a bare plan ID:
 {"plan_id": "…", "allow_unfocused": false}
 ```
 
-`allow_unfocused` is set only by an armed unattended session in the calling MCP;
-when false, a commit whose target is not the active window is refused. There is
-deliberately no `policy` field — nothing supplied at commit time can redirect
-the press to a different key, modifier set, or window.
+`allow_unfocused` is a **caller-asserted boolean**. When false, a commit whose
+target is not the active window is refused; when true, that check — the
+compositor's only independent residual check at commit time — is waived. The
+extension accepts the flag from any session-bus client and verifies nothing
+about who set it: it has no concept of policy, sessions, or arming.
+
+The binding of `allow_unfocused` to an armed unattended session is enforced one
+layer up, by the calling MCP, which sets it only after matching a live armed
+session against the policy recorded for that plan at plan time. **A client that
+calls this D-Bus object directly bypasses that enforcement entirely** and can
+waive the focus check at will. The residual guarantees against such a caller are
+the ones the compositor does enforce: a valid unexpired single-use plan id, and
+exact `(id, pid, wm_class, title)` identity of the window bound at plan time.
+
+There is deliberately no `policy` field — nothing supplied at commit time can
+redirect the press to a different key, modifier set, or window.
 
 The plan slot is cleared **before the request is even parsed**, so no refusal
 path — not even a malformed request — can leave a replayable plan behind. The

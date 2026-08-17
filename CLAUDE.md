@@ -85,7 +85,7 @@ Active integrations:
 | `CommitPointerClick` | `(s planId) → s JSON` | One-shot left click after all identity, geometry, focus, pointer, and expiry checks pass. |
 | `KeyStatus` | `() → s` | Read-only key-bridge capability/state. Never exposes the plan ID, and never uses a top-level `session` key — the MCP caller merges its own session state there. |
 | `PlanKeyPress` | `(s JSON) → s JSON` | Dry-run exact-window single-keypress plan. `keyval` is a keysym *name* resolved via ``Clutter[`KEY_${name}`]``; same 1–30 second TTL bounds as the pointer. |
-| `CommitKeyPress` | `(s JSON) → s JSON` | One-shot keypress. Takes **request JSON** `{plan_id, allow_unfocused}`, not a bare plan ID — `allow_unfocused` is granted only by an armed unattended MCP session. |
+| `CommitKeyPress` | `(s JSON) → s JSON` | One-shot keypress. Takes **request JSON** `{plan_id, allow_unfocused}`, not a bare plan ID. `allow_unfocused` waives the active-target check and is **caller-asserted**: the extension accepts it from any session-bus client. Binding it to an armed unattended session is enforced by the MCP layer above; a direct D-Bus caller bypasses that. |
 
 Hook integrations:
 - `~/.claude/hooks/notification-focus.sh` — calls `FocusTitle "claude"` on Stop hook to pop the Claude Code window when work finishes / needs attention. Wire into `settings.json` `Stop` hook to use.
