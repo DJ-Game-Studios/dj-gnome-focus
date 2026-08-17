@@ -13,7 +13,48 @@ function runAll() {
     testDisableSignals();
     testFocusByStableIdSurface();
     testPointerTwoPhaseSurface();
+    testKeyTwoPhaseSurface();
     console.log("All assertions passed!");
+}
+
+function testKeyTwoPhaseSurface() {
+    const content = fs.readFileSync(path.join(projectDir, 'extension.js'), 'utf8');
+    for (const method of ['KeyStatus', 'PlanKeyPress', 'CommitKeyPress']) {
+        assert(content.includes(`<method name="${method}">`), `${method} must be exported over D-Bus`);
+        assert(content.includes(`method === '${method}'`), `${method} must have a D-Bus dispatcher`);
+    }
+    assert(content.includes('<arg type="s" direction="in" name="requestJson"/>'),
+        'CommitKeyPress must accept request JSON, not a bare plan id');
+    assert(content.includes('create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE)'),
+        'commit must create a compositor virtual keyboard');
+    assert(content.includes('Clutter.KeyState.PRESSED') && content.includes('Clutter.KeyState.RELEASED'),
+        'commit must press and release through the virtual keyboard');
+    assert(content.includes('Clutter[`KEY_${name}`]'),
+        'keysyms must resolve by name so the bridge stays layout-independent');
+    assert(!content.includes('notify_key('),
+        'the key bridge must use keyvals, never raw layout-dependent keycodes');
+    for (const refusal of ['unknown_or_consumed_plan', 'expired_plan', 'target_identity_changed',
+        'target_not_active', 'target_changed_before_input', 'unknown_keysym',
+        'modifier_not_allowed']) {
+        assert(content.includes(refusal), `key commit must be able to refuse with ${refusal}`);
+    }
+    assert(content.includes('if (!request.allow_unfocused) {'),
+        'an inactive target must be refused unless the caller allowed it');
+    assert(content.indexOf('this._keyPlan = null;\n\n        const request = this._parseKeyCommitRequest') > -1,
+        'the plan slot must be consumed before the commit request is even parsed');
+    assert(content.indexOf('this._keyPlan = null;\n\n        const request = this._parseKeyCommitRequest') <
+        content.indexOf('notify_keyval('), 'the plan must be consumed before injection');
+    assert(content.includes('[...heldModifiers].reverse()'),
+        'modifiers must be released in reverse order');
+    assert(content.includes('} finally {'), 'a partial press must always be unwound');
+    assert(content.includes('key_release_failed'),
+        'commit must report a failed release and discard the uncertain device');
+    const keyStatusBlock = content.slice(content.indexOf('_keyStatus() {'),
+        content.indexOf('_parseKeyPressRequest'));
+    assert(!keyStatusBlock.includes('plan_id:'), 'status must not disclose the commit capability');
+    assert(!/\n\s{12}session:/.test(keyStatusBlock),
+        'KeyStatus must not use a top-level `session` key — the MCP caller merges its own there');
+    console.log('  ✔ two-phase exact-window key surface present');
 }
 
 function testPointerTwoPhaseSurface() {
@@ -28,8 +69,14 @@ function testPointerTwoPhaseSurface() {
     assert(content.includes('notify_absolute_motion'), 'commit must move through the virtual pointer');
     assert(content.includes('notify_button'), 'commit must press and release through the virtual pointer');
     assert(content.includes('Clutter.BUTTON_PRIMARY'), 'the initial surface must be left-click only');
-    assert(!content.includes('notify_key('), 'the pointer bridge must not inject keyboard input');
-    assert(!content.includes('notify_keyval('), 'the pointer bridge must not inject key symbols');
+    // The key bridge is a separate, separately gated surface. These two
+    // assertions were global until it landed; they are now scoped to the
+    // pointer commit path, which must still never inject keyboard input.
+    const pointerCommit = content.slice(content.indexOf('_commitPointerClick(planId) {'),
+        content.indexOf('_clearExpiredKeyPlan('));
+    assert(pointerCommit.length > 0, 'pointer commit block must be locatable');
+    assert(!pointerCommit.includes('notify_key('), 'the pointer bridge must not inject keyboard input');
+    assert(!pointerCommit.includes('notify_keyval('), 'the pointer bridge must not inject key symbols');
     assert(content.includes("throw new Error('target_geometry_changed')"),
         'commit must reject geometry drift');
     assert(content.includes("throw new Error('target_not_active')"),

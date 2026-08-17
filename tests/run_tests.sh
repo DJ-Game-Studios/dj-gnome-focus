@@ -24,6 +24,7 @@ run_test() {
 }
 
 run_test "Standard Assertions" test_assertions.js
+run_test "Key Injection Behavior" test_key_injection.mjs
 
 echo ""
 echo "══════════════════════════════════════════════════════"

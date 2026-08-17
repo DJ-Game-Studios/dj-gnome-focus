@@ -19,6 +19,9 @@
  *   PointerStatus() → string
  *   PlanPointerClick(requestJson: string) → string
  *   CommitPointerClick(planId: string) → string
+ *   KeyStatus() → string
+ *   PlanKeyPress(requestJson: string) → string
+ *   CommitKeyPress(requestJson: string) → string
  *
  * Wayland forbids arbitrary window manipulation from unprivileged clients.
  * Extensions run inside Mutter, so they can.
@@ -37,6 +40,28 @@ const POINTER_TTL_DEFAULT_MS = 10000;
 const POINTER_TTL_MIN_MS = 1000;
 const POINTER_TTL_MAX_MS = 30000;
 const POINTER_UNCHANGED_TOLERANCE_PX = 2;
+
+// The key surface mirrors the pointer surface: single-slot expiring plan,
+// identity re-verified at commit, no input while planning. It reuses the
+// pointer's TTL bounds verbatim so both bridges age identically.
+const KEY_SCHEMA_VERSION = 1;
+const KEY_TTL_DEFAULT_MS = 10000;
+const KEY_TTL_MIN_MS = 1000;
+const KEY_TTL_MAX_MS = 30000;
+const KEY_MODIFIER_KEYVALS = {
+    ctrl: Clutter.KEY_Control_L,
+    alt: Clutter.KEY_Alt_L,
+    shift: Clutter.KEY_Shift_L,
+    super: Clutter.KEY_Super_L,
+};
+// Keysyms arrive as NAMES ("F9", "Escape") and are resolved through
+// Clutter.KEY_<name>. Naming beats a hand-rolled keycode table: the mapping
+// stays correct under any keyboard layout. The charset guard keeps the lookup
+// from reaching non-keysym properties of the Clutter namespace.
+const KEY_NAME_PATTERN = /^[A-Za-z0-9_]{1,32}$/;
+// Each injected event is spaced one millisecond apart, matching the shipped
+// pointer press/release spacing, so a zero-duration press is never delivered.
+const KEY_EVENT_SPACING_US = 1000;
 
 const IFACE_XML = `
 <node>
@@ -120,6 +145,17 @@ const IFACE_XML = `
       <arg type="s" direction="in" name="planId"/>
       <arg type="s" direction="out" name="json"/>
     </method>
+    <method name="KeyStatus">
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="PlanKeyPress">
+      <arg type="s" direction="in" name="requestJson"/>
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="CommitKeyPress">
+      <arg type="s" direction="in" name="requestJson"/>
+      <arg type="s" direction="out" name="json"/>
+    </method>
   </interface>
 </node>`;
 
@@ -127,10 +163,14 @@ export default class DjGnomeFocus extends Extension {
     _dbusId = null;
     _pointerPlan = null;
     _virtualPointer = null;
+    _keyPlan = null;
+    _virtualKeyboard = null;
 
     enable() {
         this._pointerPlan = null;
         this._virtualPointer = null;
+        this._keyPlan = null;
+        this._virtualKeyboard = null;
         this._dbusId = Gio.DBus.session.register_object(
             '/org/gnome/Shell/Extensions/DjFocus',
             Gio.DBusNodeInfo.new_for_xml(IFACE_XML).interfaces[0],
@@ -185,6 +225,14 @@ export default class DjGnomeFocus extends Extension {
                     } else if (method === 'CommitPointerClick') {
                         const planId = params.deep_unpack()[0];
                         invocation.return_value(new GLib.Variant('(s)', [this._commitPointerClick(planId)]));
+                    } else if (method === 'KeyStatus') {
+                        invocation.return_value(new GLib.Variant('(s)', [this._keyStatus()]));
+                    } else if (method === 'PlanKeyPress') {
+                        const requestJson = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(s)', [this._planKeyPress(requestJson)]));
+                    } else if (method === 'CommitKeyPress') {
+                        const requestJson = params.deep_unpack()[0];
+                        invocation.return_value(new GLib.Variant('(s)', [this._commitKeyPress(requestJson)]));
                     } else {
                         invocation.return_error_literal(
                             Gio.DBusError, Gio.DBusError.UNKNOWN_METHOD,
@@ -209,6 +257,8 @@ export default class DjGnomeFocus extends Extension {
         }
         this._pointerPlan = null;
         this._virtualPointer = null;
+        this._keyPlan = null;
+        this._virtualKeyboard = null;
     }
 
     _focusApp(appId) {
@@ -456,6 +506,317 @@ export default class DjGnomeFocus extends Extension {
                 unchanged_geometry: true,
                 target_active: true,
                 pointer_unchanged: true,
+            },
+        });
+    }
+
+    _clearExpiredKeyPlan(nowUs = GLib.get_monotonic_time()) {
+        if (this._keyPlan && nowUs > this._keyPlan.expiresUs)
+            this._keyPlan = null;
+    }
+
+    // Resolve a keysym NAME to a Clutter keyval. Never accepts a number or a
+    // character: a numeric keyval would let a caller address keys the policy
+    // layer never named, and a character would depend on the active layout.
+    _resolveKeysym(name) {
+        if (typeof name !== 'string' || !KEY_NAME_PATTERN.test(name))
+            throw new Error('invalid_keyval_name');
+        const keyval = Clutter[`KEY_${name}`];
+        if (keyval === undefined || !Number.isInteger(keyval) || keyval <= 0)
+            throw new Error(`unknown_keysym: ${name}`);
+        return keyval;
+    }
+
+    // NOTE: the reply must not carry a top-level `session` key. The calling MCP
+    // tool merges its own armed-session state in under exactly that name, so a
+    // `session` field here would be silently overwritten. Plan state is
+    // reported as `pending_plan`, matching PointerStatus.
+    _keyStatus() {
+        this._clearExpiredKeyPlan();
+        const seat = Clutter.get_default_backend().get_default_seat();
+        return JSON.stringify({
+            ok: true,
+            schema_version: KEY_SCHEMA_VERSION,
+            available: typeof seat.create_virtual_device === 'function',
+            pending_plan: this._keyPlan ? {
+                intent: this._keyPlan.intent,
+                target_window_id: this._keyPlan.target.id,
+                keyval_name: this._keyPlan.keyvalName,
+                modifiers: this._keyPlan.modifiers,
+                expires_in_ms: Math.max(0, Math.floor(
+                    (this._keyPlan.expiresUs - GLib.get_monotonic_time()) / 1000)),
+            } : null,
+            constraints: {
+                single_key_only: true,
+                keysym_names_only: true,
+                no_text_input: true,
+                no_key_sequences: true,
+                exact_window_identity: true,
+                target_must_be_active_unless_allowed: true,
+                allowed_modifiers: Object.keys(KEY_MODIFIER_KEYVALS),
+                plan_ttl_ms: {min: KEY_TTL_MIN_MS, max: KEY_TTL_MAX_MS},
+            },
+        });
+    }
+
+    _parseKeyPressRequest(requestJson) {
+        let request;
+        try {
+            request = JSON.parse(requestJson);
+        } catch (e) {
+            throw new Error(`invalid_request_json: ${e.message}`);
+        }
+        if (!request || typeof request !== 'object' || Array.isArray(request))
+            throw new Error('invalid_request: expected an object');
+
+        const allowed = new Set([
+            'schema_version', 'window_id', 'expected_title', 'expected_wm_class',
+            'keyval', 'modifiers', 'intent', 'ttl_ms',
+        ]);
+        const unknown = Object.keys(request).filter(key => !allowed.has(key));
+        if (unknown.length > 0)
+            throw new Error(`invalid_request: unknown fields: ${unknown.join(', ')}`);
+        if (request.schema_version !== KEY_SCHEMA_VERSION)
+            throw new Error(`unsupported_schema_version: ${request.schema_version}`);
+        if (!Number.isInteger(request.window_id) || request.window_id < 1 || request.window_id > 0xffffffff)
+            throw new Error('invalid_window_id');
+        if (typeof request.expected_title !== 'string' || request.expected_title.length < 1 || request.expected_title.length > 256)
+            throw new Error('invalid_expected_title');
+        if (typeof request.expected_wm_class !== 'string' || request.expected_wm_class.length < 1 || request.expected_wm_class.length > 128)
+            throw new Error('invalid_expected_wm_class');
+        if (typeof request.intent !== 'string' || request.intent.length < 1 || request.intent.length > 120)
+            throw new Error('invalid_intent');
+
+        // The caller normalizes modifiers, but an actuator that trusts its
+        // caller's normalization is not an actuator with a boundary.
+        const rawModifiers = request.modifiers ?? [];
+        if (!Array.isArray(rawModifiers))
+            throw new Error('invalid_modifiers: expected an array');
+        if (rawModifiers.length > Object.keys(KEY_MODIFIER_KEYVALS).length)
+            throw new Error('invalid_modifiers: too many');
+        const modifiers = [];
+        for (const entry of rawModifiers) {
+            if (typeof entry !== 'string' || !Object.hasOwn(KEY_MODIFIER_KEYVALS, entry))
+                throw new Error(`modifier_not_allowed: ${entry}`);
+            if (modifiers.includes(entry))
+                throw new Error(`duplicate_modifier: ${entry}`);
+            if (!Number.isInteger(KEY_MODIFIER_KEYVALS[entry]))
+                throw new Error(`modifier_keyval_unavailable: ${entry}`);
+            modifiers.push(entry);
+        }
+
+        const keyval = this._resolveKeysym(request.keyval);
+        const ttlMs = request.ttl_ms ?? KEY_TTL_DEFAULT_MS;
+        if (!Number.isInteger(ttlMs) || ttlMs < KEY_TTL_MIN_MS || ttlMs > KEY_TTL_MAX_MS)
+            throw new Error(`invalid_ttl_ms: expected ${KEY_TTL_MIN_MS}..${KEY_TTL_MAX_MS}`);
+        return {...request, modifiers, keyval, keyvalName: request.keyval, ttl_ms: ttlMs};
+    }
+
+    // Planning sends no input and never focuses the target. It only resolves
+    // and records what a later commit would be permitted to do.
+    _planKeyPress(requestJson) {
+        const request = this._parseKeyPressRequest(requestJson);
+        const target = this._findWindow(w => w.get_id() === request.window_id);
+        if (!target)
+            throw new Error('target_window_not_found');
+        const snapshot = this._windowSnapshot(target);
+        if (snapshot.title !== request.expected_title)
+            throw new Error('target_title_mismatch');
+        if (snapshot.wm_class !== request.expected_wm_class)
+            throw new Error('target_wm_class_mismatch');
+
+        const active = global.display.get_focus_window();
+        const activeId = active ? active.get_id() : null;
+        const nowUs = GLib.get_monotonic_time();
+        // Window, keyval, modifiers and intent are bound HERE. Nothing supplied
+        // at commit time can redirect the press to another key or window.
+        const plan = {
+            id: GLib.uuid_string_random(),
+            intent: request.intent,
+            target: snapshot,
+            keyval: request.keyval,
+            keyvalName: request.keyvalName,
+            modifiers: request.modifiers,
+            expiresUs: nowUs + request.ttl_ms * 1000,
+        };
+        this._keyPlan = plan;
+        return JSON.stringify({
+            ok: true,
+            schema_version: KEY_SCHEMA_VERSION,
+            state: 'planned',
+            side_effect: false,
+            plan_id: plan.id,
+            intent: plan.intent,
+            expires_in_ms: request.ttl_ms,
+            committable: activeId === snapshot.id,
+            target: snapshot,
+            key: {
+                keyval_name: plan.keyvalName,
+                keyval: plan.keyval,
+                modifiers: plan.modifiers,
+            },
+            checks: {
+                exact_window_id: true,
+                exact_title: true,
+                exact_wm_class: true,
+                keysym_resolved: true,
+                target_active: activeId === snapshot.id,
+            },
+        });
+    }
+
+    _parseKeyCommitRequest(requestJson) {
+        let request;
+        try {
+            request = JSON.parse(requestJson);
+        } catch (e) {
+            throw new Error(`invalid_request_json: ${e.message}`);
+        }
+        if (!request || typeof request !== 'object' || Array.isArray(request))
+            throw new Error('invalid_request: expected an object');
+        const allowed = new Set(['plan_id', 'allow_unfocused']);
+        const unknown = Object.keys(request).filter(key => !allowed.has(key));
+        if (unknown.length > 0)
+            throw new Error(`invalid_request: unknown fields: ${unknown.join(', ')}`);
+        if (typeof request.plan_id !== 'string' || request.plan_id.length < 1 || request.plan_id.length > 128)
+            throw new Error('invalid_plan_id');
+        const allowUnfocused = request.allow_unfocused ?? false;
+        if (typeof allowUnfocused !== 'boolean')
+            throw new Error('invalid_allow_unfocused');
+        return {plan_id: request.plan_id, allow_unfocused: allowUnfocused};
+    }
+
+    _commitKeyPress(requestJson) {
+        // Consume the single plan slot before ANY validation — including
+        // parsing the request. No refusal path, and no thrown exception, can
+        // leave a replayable plan behind.
+        const plan = this._keyPlan;
+        this._keyPlan = null;
+
+        const request = this._parseKeyCommitRequest(requestJson);
+        if (!plan || plan.id !== request.plan_id)
+            throw new Error('unknown_or_consumed_plan');
+        const nowUs = GLib.get_monotonic_time();
+        if (nowUs > plan.expiresUs)
+            throw new Error('expired_plan');
+
+        const target = this._findWindow(w => w.get_id() === plan.target.id);
+        if (!target)
+            throw new Error('target_window_not_found');
+        const current = this._windowSnapshot(target);
+        // Four-field identity equality, matching the capture path. Geometry is
+        // deliberately not compared: a keypress has no coordinate, so a resize
+        // is not evidence that the target changed.
+        if (current.title !== plan.target.title ||
+            current.wm_class !== plan.target.wm_class ||
+            current.pid !== plan.target.pid)
+            throw new Error('target_identity_changed');
+        // Only an armed unattended session waives the focus requirement, and
+        // that decision is made by the caller's session state machine.
+        if (!request.allow_unfocused) {
+            const active = global.display.get_focus_window();
+            if (!active || active.get_id() !== plan.target.id)
+                throw new Error('target_not_active');
+        }
+
+        const seat = Clutter.get_default_backend().get_default_seat();
+        if (typeof seat.create_virtual_device !== 'function')
+            throw new Error('virtual_keyboard_unavailable');
+        if (!this._virtualKeyboard)
+            this._virtualKeyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        if (!this._virtualKeyboard)
+            throw new Error('virtual_keyboard_creation_failed');
+
+        // Device creation may allocate or yield inside Mutter. Recheck the
+        // mutable desktop state once more immediately before the first event.
+        const finalTarget = this._findWindow(w => w.get_id() === plan.target.id);
+        if (!finalTarget)
+            throw new Error('target_window_not_found');
+        const finalSnapshot = this._windowSnapshot(finalTarget);
+        if (finalSnapshot.title !== plan.target.title ||
+            finalSnapshot.wm_class !== plan.target.wm_class ||
+            finalSnapshot.pid !== plan.target.pid)
+            throw new Error('target_changed_before_input');
+        if (!request.allow_unfocused) {
+            const finalActive = global.display.get_focus_window();
+            if (!finalActive || finalActive.get_id() !== plan.target.id)
+                throw new Error('target_not_active_before_input');
+        }
+
+        // Every refusal above returns before this point, so a refused commit
+        // sends no input at all — not even a leading modifier press.
+        // Timestamps advance even when a call throws, because the argument is
+        // evaluated first — Clutter requires strictly increasing event times.
+        let eventUs = nowUs;
+        const nextUs = () => (eventUs += KEY_EVENT_SPACING_US);
+        const heldModifiers = [];
+        let keyPressed = false;
+        let completed = false;
+        try {
+            for (const mod of plan.modifiers) {
+                // Record the modifier as held BEFORE issuing the press. A throw
+                // does not prove the compositor dropped the event, and a press
+                // we failed to record is a modifier we would never unwind —
+                // i.e. a stuck Ctrl on the user's live desktop.
+                heldModifiers.push(mod);
+                this._virtualKeyboard.notify_keyval(
+                    nextUs(), KEY_MODIFIER_KEYVALS[mod], Clutter.KeyState.PRESSED);
+            }
+            keyPressed = true;
+            this._virtualKeyboard.notify_keyval(
+                nextUs(), plan.keyval, Clutter.KeyState.PRESSED);
+            completed = true;
+        } finally {
+            // Unwind whatever actually went down, innermost first, even if the
+            // press threw partway through. Nothing may be left held.
+            let releaseError = null;
+            if (keyPressed) {
+                try {
+                    this._virtualKeyboard.notify_keyval(
+                        nextUs(), plan.keyval, Clutter.KeyState.RELEASED);
+                } catch (e) {
+                    releaseError = e;
+                }
+            }
+            for (const mod of [...heldModifiers].reverse()) {
+                try {
+                    this._virtualKeyboard.notify_keyval(
+                        nextUs(), KEY_MODIFIER_KEYVALS[mod], Clutter.KeyState.RELEASED);
+                } catch (e) {
+                    releaseError = releaseError ?? e;
+                }
+            }
+            // Drop our reference after ANY injection failure, so a later plan
+            // cannot reuse a device whose key state is uncertain. `completed`
+            // false means the try block threw partway through; a throw does not
+            // tell us whether the compositor already delivered the event, so
+            // the device is only trustworthy on a clean run. This is stricter
+            // than the pointer path, which discards only on a failed release;
+            // recreating the device is free, so the stricter rule wins.
+            if (releaseError || !completed)
+                this._virtualKeyboard = null;
+            if (releaseError)
+                throw new Error(`key_release_failed: ${releaseError.message}`);
+        }
+
+        return JSON.stringify({
+            ok: true,
+            schema_version: KEY_SCHEMA_VERSION,
+            state: 'committed',
+            side_effect: true,
+            plan_id: plan.id,
+            intent: plan.intent,
+            target: current,
+            key: {
+                keyval_name: plan.keyvalName,
+                keyval: plan.keyval,
+                modifiers: plan.modifiers,
+            },
+            checks: {
+                exact_window_identity: true,
+                keysym_bound_at_plan: true,
+                target_active: !request.allow_unfocused,
+                allow_unfocused: request.allow_unfocused,
             },
         });
     }

@@ -8,9 +8,26 @@ The additive pointer surface is deliberately two-phase: `PlanPointerClick`
 performs no input and returns a secret, expiring plan ID; `CommitPointerClick`
 consumes it once after rechecking stable window ID, exact title/class,
 unchanged geometry, active focus, and unchanged human pointer position. The
-initial contract is primary-button single click only. Do not add keyboard,
-drag, scroll, double-click, sequences, or caller-selected shell commands
-without a separate safety review.
+pointer contract is primary-button single click only.
+
+The key surface (`PlanKeyPress` / `CommitKeyPress` / `KeyStatus`) mirrors it
+exactly — single-slot expiring plan, identity re-verified at commit, no input
+while planning — and was added under the reviewed game-input-injection plan in
+`dj-wow-addons/docs/superpowers/plans/2026-08-16-game-input-injection.md`. It is
+one key per plan: keysym names only, no sequences, no text, no raw keycodes.
+All policy (which window, which keys, unattended arming, budgets) lives in the
+`desktop-input` MCP, not here; the extension stays a bounded actuator.
+
+Do not add drag, scroll, double-click, key sequences, text entry, key repeat,
+or caller-selected shell commands without a separate safety review.
+
+Two invariants in `_commitKeyPress` are load-bearing and were both found by
+`tests/test_key_injection.mjs` failing:
+- the plan slot is cleared **before the commit request is parsed**, so no
+  refusal path can leave a replayable plan;
+- a modifier is pushed onto `heldModifiers` **before** its press is issued, so a
+  throwing press still unwinds. Reversing that order leaves Ctrl stuck down on
+  the live desktop.
 
 ## When editing
 
@@ -66,6 +83,9 @@ Active integrations:
 | `PointerStatus` | `() → s` | Read-only pointer capability/state; never exposes the pending commit plan ID. |
 | `PlanPointerClick` | `(s JSON) → s JSON` | Dry-run exact-window click plan using normalized in-window coordinates and a 1–30 second TTL. |
 | `CommitPointerClick` | `(s planId) → s JSON` | One-shot left click after all identity, geometry, focus, pointer, and expiry checks pass. |
+| `KeyStatus` | `() → s` | Read-only key-bridge capability/state. Never exposes the plan ID, and never uses a top-level `session` key — the MCP caller merges its own session state there. |
+| `PlanKeyPress` | `(s JSON) → s JSON` | Dry-run exact-window single-keypress plan. `keyval` is a keysym *name* resolved via ``Clutter[`KEY_${name}`]``; same 1–30 second TTL bounds as the pointer. |
+| `CommitKeyPress` | `(s JSON) → s JSON` | One-shot keypress. Takes **request JSON** `{plan_id, allow_unfocused}`, not a bare plan ID — `allow_unfocused` is granted only by an armed unattended MCP session. |
 
 Hook integrations:
 - `~/.claude/hooks/notification-focus.sh` — calls `FocusTitle "claude"` on Stop hook to pop the Claude Code window when work finishes / needs attention. Wire into `settings.json` `Stop` hook to use.

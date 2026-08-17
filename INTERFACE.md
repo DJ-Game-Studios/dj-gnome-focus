@@ -241,8 +241,83 @@ discards the virtual-device reference. Failed checks still consume the plan.
 
 **Signature**: `CommitPointerClick(planId: string) → string`
 
-The initial surface deliberately has no keyboard, drag, scroll, double-click,
-button selector, title matching, focus mutation, or arbitrary command input.
+The pointer surface deliberately has no drag, scroll, double-click, button
+selector, title matching, focus mutation, or arbitrary command input.
+
+### KeyStatus
+
+Read-only capability and key-bridge state: whether Mutter exposes virtual device
+creation, whether a plan is pending (intent, target window, keysym name,
+modifiers, remaining TTL), and the enforced constraints. The secret plan ID is
+never returned here.
+
+The reply deliberately has **no top-level `session` key**. The calling MCP tool
+merges its own armed-session state under exactly that name, so a `session` field
+here would be silently overwritten. Plan state is reported as `pending_plan`.
+
+**Signature**: `KeyStatus() → string`
+
+### PlanKeyPress
+
+Create a no-input, expiring single-keypress plan for one exact Mutter window.
+The JSON request must contain only:
+
+```json
+{
+  "schema_version": 1,
+  "window_id": 1944001617,
+  "expected_title": "World of Warcraft",
+  "expected_wm_class": "wowclassic.exe",
+  "keyval": "F9",
+  "modifiers": ["ctrl"],
+  "intent": "wow:reload-flush",
+  "ttl_ms": 10000
+}
+```
+
+`keyval` is a keysym **name** (`"F9"`, `"Escape"`) — never a number and never a
+character. It resolves through ``Clutter[`KEY_${name}`]`` and an unresolvable
+name is refused, which keeps the bridge independent of the keyboard layout.
+`modifiers` is optional and accepts only `ctrl`, `alt`, `shift`, `super`.
+
+Window, keysym, modifiers, and intent are all bound at plan time. Planning sends
+no input and does not focus the window.
+
+**Signature**: `PlanKeyPress(requestJson: string) → string`
+
+### CommitKeyPress
+
+Consume one plan exactly once. Unlike `CommitPointerClick`, this takes **request
+JSON**, not a bare plan ID:
+
+```json
+{"plan_id": "…", "allow_unfocused": false}
+```
+
+`allow_unfocused` is set only by an armed unattended session in the calling MCP;
+when false, a commit whose target is not the active window is refused. There is
+deliberately no `policy` field — nothing supplied at commit time can redirect
+the press to a different key, modifier set, or window.
+
+The plan slot is cleared **before the request is even parsed**, so no refusal
+path — not even a malformed request — can leave a replayable plan behind. The
+extension then refuses on unknown/consumed plan ID, expiry, changed window
+identity (`id`, `pid`, `wm_class`, `title`), and, unless waived, an inactive
+target; it repeats the identity and focus checks immediately before input.
+Geometry is deliberately not compared: a keypress has no coordinate.
+
+Only then does it press modifiers in order, press and release the key, and
+release modifiers in reverse order through Mutter's virtual keyboard. A refusal
+sends no input at all, not even a leading modifier press. Each modifier is
+recorded as held *before* its press is issued, so a mid-sequence failure still
+unwinds everything — a throw does not prove the compositor dropped the event,
+and an unrecorded press would be a stuck Ctrl on the live desktop. Any injection
+failure discards the virtual-device reference.
+
+**Signature**: `CommitKeyPress(requestJson: string) → string`
+
+The key surface is one key per plan: no sequences, no text entry, no key repeat,
+no raw keycodes, and no caller-chosen window at commit time.
 
 ## Integration with dj-cli
 
@@ -277,6 +352,9 @@ button selector, title matching, focus mutation, or arbitrary command input.
 | `dj_pointer_status` | `PointerStatus` |
 | `dj_pointer_plan_click` | `PlanPointerClick` |
 | `dj_pointer_commit_click` | `CommitPointerClick` |
+| `dj_key_status` | `KeyStatus` (merges its own `session` state into the reply) |
+| `dj_key_plan_press` | `PlanKeyPress` |
+| `dj_key_commit_press` | `CommitKeyPress` |
 
 ## Testing
 
