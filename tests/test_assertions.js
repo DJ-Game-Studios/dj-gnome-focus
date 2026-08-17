@@ -31,8 +31,24 @@ function testKeyTwoPhaseSurface() {
         'commit must press and release through the virtual keyboard');
     assert(content.includes('Clutter[`KEY_${name}`]'),
         'keysyms must resolve by name so the bridge stays layout-independent');
+    // Keyval injection is legal in exactly ONE method. Assert that as an
+    // inverse slice: cut the _commitKeyPress body out and ban notify_keyval(
+    // in everything that remains. Scoping the ban to a single block instead
+    // would leave _planKeyPress, _keyStatus, and every method added later
+    // unguarded — which is the whole point of a file-wide ban.
+    const commitStart = content.indexOf('    _commitKeyPress(requestJson) {');
+    const commitEnd = content.indexOf('    _findByTitle(substring) {');
+    assert(commitStart > -1, '_commitKeyPress must be locatable');
+    assert(commitEnd > commitStart, '_commitKeyPress must precede _findByTitle');
+    const outsideCommit = content.slice(0, commitStart) + content.slice(commitEnd);
+    assert(outsideCommit.includes('_planKeyPress'),
+        'the inverse slice must still contain the other key methods');
+    assert(!outsideCommit.includes('notify_keyval('),
+        'notify_keyval( may appear only inside _commitKeyPress');
+    // Raw keycodes stay banned file-wide: they are layout-dependent, so no
+    // method may ever use them, commit included.
     assert(!content.includes('notify_key('),
-        'the key bridge must use keyvals, never raw layout-dependent keycodes');
+        'no method may inject raw layout-dependent keycodes');
     for (const refusal of ['unknown_or_consumed_plan', 'expired_plan', 'target_identity_changed',
         'target_not_active', 'target_changed_before_input', 'unknown_keysym',
         'modifier_not_allowed']) {
@@ -69,14 +85,10 @@ function testPointerTwoPhaseSurface() {
     assert(content.includes('notify_absolute_motion'), 'commit must move through the virtual pointer');
     assert(content.includes('notify_button'), 'commit must press and release through the virtual pointer');
     assert(content.includes('Clutter.BUTTON_PRIMARY'), 'the initial surface must be left-click only');
-    // The key bridge is a separate, separately gated surface. These two
-    // assertions were global until it landed; they are now scoped to the
-    // pointer commit path, which must still never inject keyboard input.
-    const pointerCommit = content.slice(content.indexOf('_commitPointerClick(planId) {'),
-        content.indexOf('_clearExpiredKeyPlan('));
-    assert(pointerCommit.length > 0, 'pointer commit block must be locatable');
-    assert(!pointerCommit.includes('notify_key('), 'the pointer bridge must not inject keyboard input');
-    assert(!pointerCommit.includes('notify_keyval('), 'the pointer bridge must not inject key symbols');
+    // The pointer bridge must still never inject keyboard input. That is
+    // enforced in testKeyTwoPhaseSurface(): notify_key( is banned file-wide,
+    // and notify_keyval( is banned everywhere outside _commitKeyPress — which
+    // includes every pointer method here.
     assert(content.includes("throw new Error('target_geometry_changed')"),
         'commit must reject geometry drift');
     assert(content.includes("throw new Error('target_not_active')"),
